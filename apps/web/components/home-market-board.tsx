@@ -187,10 +187,6 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
             ))}
           </section>
 
-          <section className="section-head" style={{ marginBottom: 2 }}>
-            <h2>All markets</h2>
-          </section>
-
           <section className="pm-market-grid">
             {cards.map((item) => {
               const chanceTone = item.headlineChance >= 50 ? "up" : "down";
