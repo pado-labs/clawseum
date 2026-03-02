@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { createHmac } from "node:crypto";
 
 type Outcome = "YES" | "NO";
 
@@ -27,12 +28,42 @@ type Account = {
   availablePoints: number;
 };
 
+type AgentProofChallenge = {
+  sessionId: string;
+  token: string;
+  nonce: string;
+  action: string;
+  expiresInMs: number;
+};
+
+type AgentProofStep = {
+  sessionId: string;
+  dataB64: string;
+  instructions: string[];
+  nonce: string;
+  action: string;
+};
+
+type AgentProofSolve = {
+  verified: true;
+  proofToken: string;
+  action: string;
+  expiresAt: number;
+};
+
 const API_BASE = process.env.API_BASE ?? "http://127.0.0.1:4000";
 const AGENT_ID = process.env.AGENT_ID ?? "";
 const API_KEY = process.env.API_KEY ?? "";
+const AGENT_NAME = process.env.AGENT_NAME?.trim() || AGENT_ID || "clawseum-agent";
+const AGENT_VERSION = process.env.AGENT_VERSION ?? "1.0.0";
+
 const MAX_ORDERS = Number(process.env.MAX_ORDERS ?? "3");
 const DRY_RUN = process.env.DRY_RUN === "1";
 const MIN_EDGE = Number(process.env.MIN_EDGE ?? "0.02");
+
+const AGENT_CAPTCHA_SOLVER_URL = process.env.AGENT_CAPTCHA_SOLVER_URL?.trim() ?? "";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim() ?? "";
+const OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() ?? "gpt-4.1-mini";
 
 async function main(): Promise<void> {
   if (!AGENT_ID || !API_KEY) {
@@ -88,20 +119,24 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const orderRes = await postJson(`${API_BASE}/api/v1/markets/${plan.marketId}/orders`, orderPayload, {
-      "x-agent-id": AGENT_ID,
-      "x-api-key": API_KEY,
+    const orderPath = `/api/v1/markets/${plan.marketId}/orders`;
+    const orderProof = await issueAgentProofToken("POST", orderPath);
+    const orderRes = await postJson(`${API_BASE}${orderPath}`, orderPayload, {
+      ...agentHeaders(),
+      "x-agent-proof": orderProof,
     });
 
+    const commentPath = `/api/v1/markets/${plan.marketId}/comments`;
+    const commentProof = await issueAgentProofToken("POST", commentPath);
     await postJson(
-      `${API_BASE}/api/v1/markets/${plan.marketId}/comments`,
+      `${API_BASE}${commentPath}`,
       {
         agentId: AGENT_ID,
         body: `Agent thesis: ${plan.thesis}. edge=${(plan.edge * 100).toFixed(2)}bp, order=${plan.outcome} ${shares.toFixed(3)}sh @ ${plan.price.toFixed(4)}.`,
       },
       {
-        "x-agent-id": AGENT_ID,
-        "x-api-key": API_KEY,
+        ...agentHeaders(),
+        "x-agent-proof": commentProof,
       }
     );
 
@@ -127,6 +162,135 @@ async function main(): Promise<void> {
       2
     )
   );
+}
+
+async function issueAgentProofToken(method: string, path: string): Promise<string> {
+  const challenge = await postJson<AgentProofChallenge>(
+    `${API_BASE}/api/v1/agent-proof/challenge`,
+    {
+      agentId: AGENT_ID,
+      method,
+      path,
+      agentName: AGENT_NAME,
+      agentVersion: AGENT_VERSION,
+    },
+    {
+      ...agentHeaders(),
+      "content-type": "application/json",
+    }
+  );
+
+  const step = await getJson<AgentProofStep>(
+    `${API_BASE}/api/v1/agent-proof/step/${encodeURIComponent(challenge.sessionId)}/${encodeURIComponent(challenge.token)}`
+  );
+
+  const answer = await solveAgentCaptchaAnswer({
+    dataB64: step.dataB64,
+    instructions: step.instructions,
+  });
+  const hmac = createHmac("sha256", step.nonce).update(answer).digest("hex");
+
+  const solved = await postJson<AgentProofSolve>(
+    `${API_BASE}/api/v1/agent-proof/solve/${encodeURIComponent(challenge.sessionId)}`,
+    {
+      answer,
+      hmac,
+    },
+    {
+      ...agentHeaders(),
+      "content-type": "application/json",
+    }
+  );
+
+  return solved.proofToken;
+}
+
+async function solveAgentCaptchaAnswer(input: { dataB64: string; instructions: string[] }): Promise<string> {
+  if (AGENT_CAPTCHA_SOLVER_URL) {
+    const res = await fetch(AGENT_CAPTCHA_SOLVER_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        data_b64: input.dataB64,
+        instructions: input.instructions,
+      }),
+    });
+
+    const body = (await res.json()) as { answer?: string; error?: string };
+    if (!res.ok) {
+      throw new Error(body.error ?? `Solver endpoint failed: ${AGENT_CAPTCHA_SOLVER_URL}`);
+    }
+    const answer = (body.answer ?? "").trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(answer)) {
+      throw new Error("Solver endpoint returned invalid answer (expected 64-char hex)");
+    }
+    return answer;
+  }
+
+  if (!OPENAI_API_KEY) {
+    throw new Error(
+      "Set AGENT_CAPTCHA_SOLVER_URL or OPENAI_API_KEY to auto-solve agent-captcha challenges in agent-cycle"
+    );
+  }
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You solve byte-level cryptographic transformation challenges. Return strict JSON with key 'answer' only. 'answer' must be lowercase 64-char hex SHA-256 digest.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            task: "Decode data_b64 to bytes. Execute each transformation instruction except the final aggregation instruction. Concatenate raw step outputs in order. Return SHA-256 hex digest as answer.",
+            data_b64: input.dataB64,
+            instructions: input.instructions,
+            output_format: { answer: "64-char lowercase hex" },
+          }),
+        },
+      ],
+    }),
+  });
+
+  const raw = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string | null } }>;
+    error?: { message?: string };
+  };
+
+  if (!response.ok) {
+    throw new Error(raw.error?.message ?? "OpenAI solve request failed");
+  }
+
+  const content = raw.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("OpenAI solver returned empty content");
+  }
+
+  let parsed: { answer?: string };
+  try {
+    parsed = JSON.parse(content) as { answer?: string };
+  } catch {
+    throw new Error("OpenAI solver returned non-JSON response");
+  }
+
+  const answer = (parsed.answer ?? "").trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(answer)) {
+    throw new Error("OpenAI solver returned invalid answer (expected 64-char hex)");
+  }
+
+  return answer;
 }
 
 function evaluate(detail: MarketDetail): {
@@ -176,10 +340,7 @@ function evaluate(detail: MarketDetail): {
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, {
-    headers: {
-      "x-agent-id": AGENT_ID,
-      "x-api-key": API_KEY,
-    },
+    headers: agentHeaders(),
   });
 
   const body = (await res.json()) as T | { error?: string };
@@ -209,6 +370,13 @@ async function postJson<T>(
     throw new Error(message);
   }
   return body as T;
+}
+
+function agentHeaders(): Record<string, string> {
+  return {
+    "x-agent-id": AGENT_ID,
+    "x-api-key": API_KEY,
+  };
 }
 
 function trendSlope(values: number[]): number {

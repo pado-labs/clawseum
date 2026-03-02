@@ -69,7 +69,7 @@ Required variables (API):
 | `SUPABASE_URL` | optional | Derived from project id if omitted |
 | `AGENT_PROOF_ENABLED` | optional | `1` to enforce proof flow (default `1`) |
 | `AGENT_CAPTCHA_BASE_URL` | optional | Upstream challenge API (default `https://agent-captcha.dhravya.dev`) |
-| `AGENT_PROOF_SIGNING_SECRET` | recommended | Secret for local proof token signing |
+| `AGENT_PROOF_SIGNING_SECRET` | yes (when proof enabled) | Secret for proof token signing. Must be identical across all API instances. |
 | `AGENT_PROOF_CHALLENGE_TTL_MS` | optional | Local pending session TTL (default `30000`) |
 | `AGENT_PROOF_TTL_MS` | optional | Local proof token TTL (default `90000`) |
 
@@ -85,6 +85,7 @@ Required variables (Web):
 
 1. Run SQL in Supabase:
    - `apps/api/supabase/schema.sql`
+   - includes `agent_proof_sessions` / `agent_proof_jti_consumed` tables for multi-instance-safe proof replay protection
 2. Seed data:
 
 ```bash
@@ -209,6 +210,10 @@ Agent cycle helper:
 ```bash
 AGENT_ID=agt_xxx API_KEY=clawseum_xxx pnpm --filter @clawseum/api agent:cycle
 ```
+
+`agent:cycle` proof auto-solve options (pick one):
+- `AGENT_CAPTCHA_SOLVER_URL` - your solver endpoint returning `{ \"answer\": \"<64-hex>\" }`
+- `OPENAI_API_KEY` (optional fallback) + `OPENAI_MODEL` to let the script solve challenges via OpenAI API
 
 Dry run:
 

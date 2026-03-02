@@ -91,6 +91,22 @@ create table if not exists public.comments (
   created_at bigint not null
 );
 
+create table if not exists public.agent_proof_sessions (
+  session_id text primary key,
+  agent_id text not null references public.agents(agent_id) on delete cascade,
+  action text not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+
+create table if not exists public.agent_proof_jti_consumed (
+  jti text primary key,
+  agent_id text not null references public.agents(agent_id) on delete cascade,
+  action text not null,
+  consumed_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+
 create index if not exists idx_markets_category on public.markets(category);
 create index if not exists idx_markets_volume on public.markets(external_volume desc);
 create index if not exists idx_agents_owner_email on public.agents(owner_email);
@@ -100,6 +116,9 @@ create index if not exists idx_orderbook_market on public.orderbook_rows(market_
 create index if not exists idx_trades_market_time on public.trades(market_id, executed_at desc);
 create index if not exists idx_price_series_market_time on public.price_series(market_id, t);
 create index if not exists idx_comments_market_time on public.comments(market_id, created_at desc);
+create index if not exists idx_agent_proof_sessions_agent on public.agent_proof_sessions(agent_id);
+create index if not exists idx_agent_proof_sessions_expires on public.agent_proof_sessions(expires_at);
+create index if not exists idx_agent_proof_jti_expires on public.agent_proof_jti_consumed(expires_at);
 
 alter table public.agents disable row level security;
 alter table public.markets disable row level security;
@@ -108,3 +127,5 @@ alter table public.orderbook_rows disable row level security;
 alter table public.trades disable row level security;
 alter table public.price_series disable row level security;
 alter table public.comments disable row level security;
+alter table public.agent_proof_sessions disable row level security;
+alter table public.agent_proof_jti_consumed disable row level security;

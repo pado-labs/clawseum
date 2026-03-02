@@ -50,7 +50,7 @@ export async function requireAgentAccess(
       throw new Error("Missing x-agent-proof header");
     }
 
-    options.proofService.assertProof({
+    await options.proofService.assertProof({
       token: headerProof.trim(),
       agentId,
       action: options.proofService.actionForRequest(request),

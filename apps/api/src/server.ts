@@ -19,7 +19,8 @@ if (!process.env.SUPABASE_URL && process.env.SUPABASE_PROJECT_ID) {
 const exchange = new SupabaseExchangeService();
 await exchange.ready();
 const { client: supabaseAuthClient } = createSupabaseContext();
-const agentProof = new AgentProofService();
+const agentProof = new AgentProofService(supabaseAuthClient);
+await agentProof.ready();
 
 await app.register(cors, { origin: true });
 

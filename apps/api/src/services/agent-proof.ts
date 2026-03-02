@@ -1,4 +1,5 @@
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FastifyRequest } from "fastify";
 
 type AgentCaptchaChallengeResponse = {
@@ -22,9 +23,10 @@ type AgentCaptchaSolveResponse = {
 };
 
 type PendingSession = {
+  sessionId: string;
   agentId: string;
   action: string;
-  expiresAtMs: number;
+  expiresAt: string;
 };
 
 type ProofClaims = {
@@ -111,12 +113,20 @@ async function readJson(res: Response): Promise<JsonRecord> {
   return body as JsonRecord;
 }
 
-function isExpired(expiresAtMs: number): boolean {
-  return Date.now() >= expiresAtMs;
-}
-
 function responseMessage(body: JsonRecord, fallback: string): string {
   return typeof body.message === "string" && body.message.trim() ? body.message : fallback;
+}
+
+function toIso(ms: number): string {
+  return new Date(ms).toISOString();
+}
+
+function toMs(iso: string): number {
+  return new Date(iso).getTime();
+}
+
+function isExpiredIso(iso: string): boolean {
+  return Date.now() >= toMs(iso);
 }
 
 export class AgentProofService {
@@ -125,15 +135,25 @@ export class AgentProofService {
   private readonly challengeTtlMs: number;
   private readonly proofTtlMs: number;
   private readonly signingSecret: string;
-  private readonly pendingSessions = new Map<string, PendingSession>();
-  private readonly consumedProofs = new Map<string, number>();
+  private readonly readyPromise: Promise<void>;
 
-  constructor() {
+  constructor(private readonly client: SupabaseClient) {
     this.enabled = (process.env.AGENT_PROOF_ENABLED ?? "1") !== "0";
     this.captchaBaseUrl = (process.env.AGENT_CAPTCHA_BASE_URL?.trim() || DEFAULT_CAPTCHA_BASE_URL).replace(/\/+$/g, "");
     this.challengeTtlMs = parsePositiveInt(process.env.AGENT_PROOF_CHALLENGE_TTL_MS, 30_000, 5_000, 120_000);
     this.proofTtlMs = parsePositiveInt(process.env.AGENT_PROOF_TTL_MS, 90_000, 10_000, 600_000);
-    this.signingSecret = process.env.AGENT_PROOF_SIGNING_SECRET?.trim() || randomBytes(32).toString("hex");
+
+    const secret = process.env.AGENT_PROOF_SIGNING_SECRET?.trim();
+    if (this.enabled && !secret) {
+      throw new Error("AGENT_PROOF_SIGNING_SECRET is required when AGENT_PROOF_ENABLED=1 and must be identical across all API instances");
+    }
+    this.signingSecret = secret ?? "";
+
+    this.readyPromise = this.verifySchema();
+  }
+
+  async ready(): Promise<void> {
+    await this.readyPromise;
   }
 
   isEnabled(): boolean {
@@ -165,7 +185,8 @@ export class AgentProofService {
     action: string;
     expiresInMs: number;
   }> {
-    this.cleanup();
+    await this.ready();
+    await this.cleanupExpiredRows();
 
     const response = await fetch(`${this.captchaBaseUrl}/api/challenge`, {
       method: "POST",
@@ -189,11 +210,19 @@ export class AgentProofService {
       message: typeof body.message === "string" ? body.message : undefined,
     };
 
-    this.pendingSessions.set(parsed.session_id, {
-      agentId: input.agentId,
-      action: input.action,
-      expiresAtMs: Date.now() + this.challengeTtlMs,
-    });
+    const { error } = await this.client.from("agent_proof_sessions").upsert(
+      {
+        session_id: parsed.session_id,
+        agent_id: input.agentId,
+        action: input.action,
+        expires_at: toIso(Date.now() + this.challengeTtlMs),
+      },
+      { onConflict: "session_id" }
+    );
+
+    if (error) {
+      throw new Error(`Failed to persist agent proof session: ${error.message}`);
+    }
 
     return {
       sessionId: parsed.session_id,
@@ -215,8 +244,10 @@ export class AgentProofService {
     nonce: string;
     action: string;
   }> {
-    this.cleanup();
-    const pending = this.assertPendingSession(input.sessionId, input.agentId);
+    await this.ready();
+    await this.cleanupExpiredRows();
+
+    const pending = await this.assertPendingSession(input.sessionId, input.agentId);
 
     const response = await fetch(
       `${this.captchaBaseUrl}/api/step/${encodeURIComponent(input.sessionId)}/${encodeURIComponent(input.token)}`
@@ -224,7 +255,7 @@ export class AgentProofService {
     const body = await readJson(response);
     if (!response.ok) {
       if (response.status >= 400) {
-        this.pendingSessions.delete(input.sessionId);
+        await this.deleteSession(input.sessionId);
       }
       const message = responseMessage(body, "Unable to fetch challenge step");
       throw new Error(`agent-captcha step failed: ${message}`);
@@ -257,8 +288,10 @@ export class AgentProofService {
     action: string;
     expiresAt: number;
   }> {
-    this.cleanup();
-    const pending = this.assertPendingSession(input.sessionId, input.agentId);
+    await this.ready();
+    await this.cleanupExpiredRows();
+
+    const pending = await this.assertPendingSession(input.sessionId, input.agentId);
 
     const response = await fetch(`${this.captchaBaseUrl}/api/solve/${encodeURIComponent(input.sessionId)}`, {
       method: "POST",
@@ -272,7 +305,7 @@ export class AgentProofService {
     });
     const body = await readJson(response);
     if (!response.ok) {
-      this.pendingSessions.delete(input.sessionId);
+      await this.deleteSession(input.sessionId);
       const message = responseMessage(body, "Challenge solve failed");
       throw new Error(`agent-captcha solve failed: ${message}`);
     }
@@ -284,11 +317,11 @@ export class AgentProofService {
     };
 
     if (!parsed.verified || !parsed.token) {
-      this.pendingSessions.delete(input.sessionId);
+      await this.deleteSession(input.sessionId);
       throw new Error("agent-captcha solve failed: invalid verification response");
     }
 
-    this.pendingSessions.delete(input.sessionId);
+    await this.deleteSession(input.sessionId);
     const { token, expiresAt } = this.issueProofToken({
       agentId: input.agentId,
       action: pending.action,
@@ -302,8 +335,10 @@ export class AgentProofService {
     };
   }
 
-  assertProof(input: { token: string; agentId: string; action: string }): void {
-    this.cleanup();
+  async assertProof(input: { token: string; agentId: string; action: string }): Promise<void> {
+    await this.ready();
+    await this.cleanupExpiredRows();
+
     const claims = this.verifyProofToken(input.token);
 
     if (claims.agentId !== input.agentId) {
@@ -312,25 +347,73 @@ export class AgentProofService {
     if (claims.action !== input.action) {
       throw new Error("Agent proof token action mismatch");
     }
-    if (this.consumedProofs.has(claims.jti)) {
-      throw new Error("Agent proof token already used; solve a new challenge");
-    }
 
-    this.consumedProofs.set(claims.jti, claims.exp * 1_000);
+    const { error } = await this.client.from("agent_proof_jti_consumed").insert({
+      jti: claims.jti,
+      agent_id: claims.agentId,
+      action: claims.action,
+      expires_at: toIso(claims.exp * 1_000),
+    });
+
+    if (error) {
+      if (error.code === "23505") {
+        throw new Error("Agent proof token already used; solve a new challenge");
+      }
+      throw new Error(`Failed to persist consumed proof token: ${error.message}`);
+    }
   }
 
-  private assertPendingSession(sessionId: string, agentId: string): PendingSession {
-    const pending = this.pendingSessions.get(sessionId);
-    if (!pending) {
+  private async verifySchema(): Promise<void> {
+    if (!this.enabled) {
+      return;
+    }
+
+    const [sessionsRes, consumedRes] = await Promise.all([
+      this.client.from("agent_proof_sessions").select("session_id").limit(1),
+      this.client.from("agent_proof_jti_consumed").select("jti").limit(1),
+    ]);
+
+    if (sessionsRes.error) {
+      throw new Error(
+        `Missing agent_proof_sessions table. Apply apps/api/supabase/schema.sql before starting API. Original error: ${sessionsRes.error.message}`
+      );
+    }
+    if (consumedRes.error) {
+      throw new Error(
+        `Missing agent_proof_jti_consumed table. Apply apps/api/supabase/schema.sql before starting API. Original error: ${consumedRes.error.message}`
+      );
+    }
+  }
+
+  private async assertPendingSession(sessionId: string, agentId: string): Promise<PendingSession> {
+    const { data, error } = await this.client
+      .from("agent_proof_sessions")
+      .select("session_id, agent_id, action, expires_at")
+      .eq("session_id", sessionId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to load pending agent proof session: ${error.message}`);
+    }
+    if (!data) {
       throw new Error("No pending agent proof session. Start again with /api/v1/agent-proof/challenge");
     }
+
+    const pending: PendingSession = {
+      sessionId: String(data.session_id),
+      agentId: String(data.agent_id),
+      action: String(data.action),
+      expiresAt: String(data.expires_at),
+    };
+
     if (pending.agentId !== agentId) {
       throw new Error("Agent proof session belongs to a different agent");
     }
-    if (isExpired(pending.expiresAtMs)) {
-      this.pendingSessions.delete(sessionId);
+    if (isExpiredIso(pending.expiresAt)) {
+      await this.deleteSession(sessionId);
       throw new Error("Agent proof session expired. Start again with /api/v1/agent-proof/challenge");
     }
+
     return pending;
   }
 
@@ -413,17 +496,26 @@ export class AgentProofService {
     return createHmac("sha256", this.signingSecret).update(content, "utf8").digest("base64url");
   }
 
-  private cleanup(): void {
-    const nowMs = Date.now();
-    for (const [sessionId, pending] of this.pendingSessions.entries()) {
-      if (isExpired(pending.expiresAtMs)) {
-        this.pendingSessions.delete(sessionId);
-      }
+  private async deleteSession(sessionId: string): Promise<void> {
+    const { error } = await this.client.from("agent_proof_sessions").delete().eq("session_id", sessionId);
+    if (error) {
+      throw new Error(`Failed to delete agent proof session: ${error.message}`);
     }
-    for (const [jti, expiresAtMs] of this.consumedProofs.entries()) {
-      if (nowMs >= expiresAtMs) {
-        this.consumedProofs.delete(jti);
-      }
+  }
+
+  private async cleanupExpiredRows(): Promise<void> {
+    const nowIso = toIso(Date.now());
+
+    const [sessionsRes, consumedRes] = await Promise.all([
+      this.client.from("agent_proof_sessions").delete().lt("expires_at", nowIso),
+      this.client.from("agent_proof_jti_consumed").delete().lt("expires_at", nowIso),
+    ]);
+
+    if (sessionsRes.error) {
+      throw new Error(`Failed to cleanup expired agent proof sessions: ${sessionsRes.error.message}`);
+    }
+    if (consumedRes.error) {
+      throw new Error(`Failed to cleanup expired consumed proof tokens: ${consumedRes.error.message}`);
     }
   }
 }
