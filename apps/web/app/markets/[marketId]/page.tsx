@@ -1,6 +1,6 @@
 import Link from "next/link";
 import CommentThread from "../../../components/comment-thread";
-import MarketLivelineChart from "../../../components/market-liveline-chart";
+import MarketLightweightChart from "../../../components/market-lightweight-chart";
 
 interface MarketDetail {
   marketId: string;
@@ -94,32 +94,6 @@ function price(v: number | null): string {
   return `${Math.round(v * 100)}c`;
 }
 
-function midPrice(bid: number | null, ask: number | null, fallback: number): number {
-  if (bid === null && ask === null) return fallback;
-  if (bid === null) return ask ?? fallback;
-  if (ask === null) return bid;
-  return (bid + ask) / 2;
-}
-
-function normalizeSeries(values: number[], fallback: number): number[] {
-  if (values.length === 0) return [clamp01(fallback), clamp01(fallback)];
-  if (values.length === 1) {
-    const value = normalizePoint(values[0] ?? fallback);
-    return [value, value];
-  }
-  return values.map((value) => normalizePoint(value));
-}
-
-function normalizePoint(v: number): number {
-  if (!Number.isFinite(v)) return 0.5;
-  if (v > 1) return clamp01(v / 100);
-  return clamp01(v);
-}
-
-function clamp01(v: number): number {
-  return Math.max(0.01, Math.min(0.99, v));
-}
-
 export default async function MarketDetailPage({
   params,
 }: {
@@ -139,11 +113,10 @@ export default async function MarketDetailPage({
     );
   }
 
-  const fallbackYes = midPrice(detail.yes.bestBid, detail.yes.bestAsk, 0.5);
-  const yesLine = normalizeSeries(
-    detail.priceSeries.map((p) => p.yes),
-    fallbackYes
-  );
+  const chartPoints =
+    detail.priceSeries.length > 0
+      ? detail.priceSeries
+      : [{ t: Date.now(), yes: detail.voteItems[0]?.lastPrice ?? 0.5, no: detail.voteItems[1]?.lastPrice ?? 0.5 }];
 
   const commentAgents = detail.topHolders.map((h) => ({
     agentId: h.agentId,
@@ -174,7 +147,7 @@ export default async function MarketDetailPage({
               <h3>Market Trend</h3>
               <span className="muted">Live probability (YES)</span>
             </div>
-            <MarketLivelineChart className="trend-chart-canvas" series={yesLine} />
+            <MarketLightweightChart className="trend-chart-canvas" points={chartPoints} />
           </article>
 
           <article className="card-surface vote-items">
