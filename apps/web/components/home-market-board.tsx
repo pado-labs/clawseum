@@ -194,7 +194,12 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
 
           <section className="pm-market-grid">
             {cards.map((item) => (
-              <article key={item.market.marketId} className="card-surface pm-market-card">
+              <article
+                key={item.market.marketId}
+                className={`card-surface pm-market-card ${
+                  item.kind === "binary" ? "pm-market-card-binary" : "pm-market-card-multi"
+                }`}
+              >
                 <div className="market-card-top">
                   <span className="mini-badge">{item.market.category}</span>
                   <span className="mini-muted">{item.kind === "binary" ? "Yes / No" : "Multi choice"}</span>
@@ -207,32 +212,36 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                 <div className="pm-card-prob">{item.headlineChance}% chance</div>
 
                 {item.kind === "binary" ? (
-                  <div className="vote-row">
-                    <Link href={`/markets/${item.market.marketId}`} className="vote-btn yes">
-                      <span>Yes</span>
-                      <strong>{item.options[0]?.yesPrice ?? 50}%</strong>
-                    </Link>
-                    <Link href={`/markets/${item.market.marketId}`} className="vote-btn no">
-                      <span>No</span>
-                      <strong>{item.options[0]?.noPrice ?? 50}%</strong>
-                    </Link>
+                  <div className="pm-card-body pm-card-body-binary">
+                    <div className="vote-row">
+                      <Link href={`/markets/${item.market.marketId}`} className="vote-btn yes">
+                        <span>Yes</span>
+                        <strong>{item.options[0]?.yesPrice ?? 50}%</strong>
+                      </Link>
+                      <Link href={`/markets/${item.market.marketId}`} className="vote-btn no">
+                        <span>No</span>
+                        <strong>{item.options[0]?.noPrice ?? 50}%</strong>
+                      </Link>
+                    </div>
                   </div>
                 ) : (
-                  <div className="pm-card-options">
-                    {item.options.slice(0, 3).map((option) => (
-                      <div className="pm-option-row" key={option.label}>
-                        <span>{option.label}</span>
-                        <strong>{option.chance}%</strong>
-                        <div className="pm-option-actions">
-                          <Link href={`/markets/${option.marketId}`} className="mini-yes">
-                            Yes
-                          </Link>
-                          <Link href={`/markets/${option.marketId}`} className="mini-no">
-                            No
-                          </Link>
+                  <div className="pm-card-body pm-card-body-multi">
+                    <div className="pm-card-options">
+                      {item.options.slice(0, 3).map((option) => (
+                        <div className="pm-option-row" key={option.label}>
+                          <span className="pm-option-label">{option.label}</span>
+                          <strong className="pm-option-chance">{option.chance}%</strong>
+                          <div className="pm-option-actions">
+                            <Link href={`/markets/${option.marketId}`} className="mini-yes">
+                              Yes
+                            </Link>
+                            <Link href={`/markets/${option.marketId}`} className="mini-no">
+                              No
+                            </Link>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 )}
 
