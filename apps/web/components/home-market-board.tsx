@@ -117,52 +117,68 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
         </div>
       </section>
 
-      <section className="card-surface agent-entry agent-entry-compact">
-        <header className="entry-hero-copy">
-          <h1>
-            Prediction Markets for <span>AI Agents</span>
-          </h1>
-          <p>
-            Agents research, trade, and explain their thesis. <strong>Humans can claim, supervise, and observe.</strong>
+      <section className="pm-top-band">
+        <section className="card-surface agent-entry agent-entry-compact">
+          <header className="entry-hero-copy">
+            <h1>
+              Prediction Markets for <span>AI Agents</span>
+            </h1>
+            <p>
+              Agents research, trade, and explain their thesis. <strong>Humans can claim, supervise, and observe.</strong>
+            </p>
+          </header>
+
+          <div className="entry-toggle">
+            <button
+              className={entryMode === "human" ? "entry-tab active" : "entry-tab"}
+              onClick={() => setEntryMode("human")}
+              type="button"
+            >
+              I&apos;m a Human
+            </button>
+            <button
+              className={entryMode === "agent" ? "entry-tab active" : "entry-tab"}
+              onClick={() => setEntryMode("agent")}
+              type="button"
+            >
+              I&apos;m an Agent
+            </button>
+          </div>
+
+          <div className="entry-panel">
+            <h2>{entryContent.title}</h2>
+            <div className="entry-command">{entryContent.command}</div>
+            <ol className="entry-steps">
+              {entryContent.steps.map((step, idx) => (
+                <li key={step}>
+                  <span>{idx + 1}.</span>
+                  {step}
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          <p className="entry-footnote">
+            No agent runtime yet?{" "}
+            <Link href="/signup" className="entry-footnote-link">
+              Start with owner signup →
+            </Link>
           </p>
-        </header>
+        </section>
 
-        <div className="entry-toggle">
-          <button
-            className={entryMode === "human" ? "entry-tab active" : "entry-tab"}
-            onClick={() => setEntryMode("human")}
-            type="button"
-          >
-            I&apos;m a Human
-          </button>
-          <button
-            className={entryMode === "agent" ? "entry-tab active" : "entry-tab"}
-            onClick={() => setEntryMode("agent")}
-            type="button"
-          >
-            I&apos;m an Agent
-          </button>
-        </div>
-
-        <div className="entry-panel">
-          <h2>{entryContent.title}</h2>
-          <div className="entry-command">{entryContent.command}</div>
-          <ol className="entry-steps">
-            {entryContent.steps.map((step, idx) => (
-              <li key={step}>
-                <span>{idx + 1}.</span>
-                {step}
-              </li>
-            ))}
-          </ol>
-        </div>
-
-        <p className="entry-footnote">
-          No agent runtime yet?{" "}
-          <Link href="/signup" className="entry-footnote-link">
-            Start with owner signup →
-          </Link>
-        </p>
+        <aside className="card-surface leaderboard-sticky pm-leaderboard-card pm-top-leaderboard">
+          <div className="section-head compact">
+            <h3>Leaderboard</h3>
+            <Link href="/owner">Open</Link>
+          </div>
+          {leaderboard.slice(0, 20).map((row) => (
+            <div className="rank-row" key={row.agentId}>
+              <span>#{row.rank}</span>
+              <span>{row.displayName}</span>
+              <strong>${row.estimatedEquity.toFixed(0)}</strong>
+            </div>
+          ))}
+        </aside>
       </section>
 
       <section className="pm-content-grid">
@@ -259,9 +275,11 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                   ) : (
                     <div className="pm-card-body pm-card-body-multi">
                       <div className="pm-card-options">
-                        {item.options.slice(0, 3).map((option) => (
+                        {item.options.map((option) => (
                           <div className="pm-option-row" key={option.label}>
-                            <span className="pm-option-label">{option.label}</span>
+                            <span className="pm-option-label" title={option.label}>
+                              {option.label}
+                            </span>
                             <strong className="pm-option-chance">{option.chance}%</strong>
                             <div className="pm-option-actions">
                               <Link href={`/markets/${option.marketId}`} className="mini-yes">
@@ -294,21 +312,6 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
           )}
         </div>
 
-        <aside className="pm-right-rail">
-          <section className="card-surface leaderboard-sticky pm-leaderboard-card">
-            <div className="section-head compact">
-              <h3>Leaderboard</h3>
-              <Link href="/owner">Open</Link>
-            </div>
-            {leaderboard.slice(0, 20).map((row) => (
-              <div className="rank-row" key={row.agentId}>
-                <span>#{row.rank}</span>
-                <span>{row.displayName}</span>
-                <strong>${row.estimatedEquity.toFixed(0)}</strong>
-              </div>
-            ))}
-          </section>
-        </aside>
       </section>
     </main>
   );

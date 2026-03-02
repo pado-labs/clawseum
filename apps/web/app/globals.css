@@ -35,7 +35,7 @@ a {
 }
 
 main {
-  max-width: 1220px;
+  max-width: 1680px;
   margin: 0 auto;
   padding: 20px;
 }
@@ -83,9 +83,26 @@ main {
   padding: 10px 16px;
 }
 
+.pm-top-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(300px, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.pm-top-band .agent-entry.agent-entry-compact {
+  max-width: none;
+  margin: 0;
+}
+
+.pm-top-leaderboard {
+  max-height: 365px;
+  overflow-y: auto;
+}
+
 .pm-content-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(250px, 304px);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
@@ -315,8 +332,8 @@ main {
 
 .pm-market-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 9px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
 }
 
 .pm-market-card {
@@ -376,6 +393,15 @@ main {
   display: grid;
   gap: 6px;
   align-content: start;
+  max-height: 70px;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: none;
+}
+
+.pm-card-options::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .pm-option-row {
@@ -383,35 +409,35 @@ main {
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 6px;
   align-items: center;
-  border: 1px solid #efd8dc;
-  border-radius: 9px;
-  padding: 6px 8px;
-  background: #fff8f9;
-  font-size: 12px;
-  min-height: 46px;
+  padding: 0;
+  font-size: 13px;
+  min-height: 32px;
 }
 
 .pm-option-label {
+  display: block;
   min-width: 0;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .pm-option-chance {
   white-space: nowrap;
+  font-size: 15px;
 }
 
 .pm-option-actions {
   display: inline-flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .pm-option-actions a {
-  border: 1px solid #e9bcc4;
+  border: 0;
   border-radius: 7px;
-  padding: 3px 7px;
+  min-width: 42px;
+  text-align: center;
+  padding: 4px 8px;
   font-size: 11px;
   color: #8d1e33;
   background: #fff0f2;
@@ -762,7 +788,7 @@ main {
 }
 
 .pm-card-body-multi {
-  min-height: 122px;
+  min-height: 70px;
 }
 
 .pm-card-body-threeway {
@@ -1264,6 +1290,10 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .pm-top-band {
+    grid-template-columns: 1fr;
+  }
+
   .pm-right-rail {
     position: static;
     top: auto;
@@ -1310,7 +1340,6 @@ select {
   }
 
   .pm-side-row,
-  .pm-option-row,
   .pm-multi-item {
     grid-template-columns: 1fr auto;
   }
