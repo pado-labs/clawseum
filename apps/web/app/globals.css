@@ -104,6 +104,9 @@ main {
 
 .pm-right-rail {
   min-width: 0;
+  position: sticky;
+  top: 96px;
+  align-self: start;
 }
 
 .pm-nav-chip {
@@ -393,12 +396,12 @@ main {
   border: 1px solid #4d3b3e;
   color: #f7f1f2;
   display: grid;
-  gap: 10px;
-  padding: clamp(12px, 1.6vw, 18px);
+  gap: 8px;
+  padding: clamp(10px, 1.1vw, 14px);
 }
 
 .agent-entry.agent-entry-compact {
-  max-width: 880px;
+  max-width: 760px;
   width: 100%;
   margin: 0 auto;
 }
@@ -411,7 +414,7 @@ main {
 
 .entry-hero-copy h1 {
   margin: 0;
-  font-size: clamp(26px, 3.8vw, 46px);
+  font-size: clamp(22px, 3vw, 38px);
   line-height: 1.05;
   letter-spacing: -0.02em;
   color: #f8f3f4;
@@ -423,10 +426,10 @@ main {
 
 .entry-hero-copy p {
   margin: 0 auto;
-  font-size: clamp(16px, 1.45vw, 19px);
+  font-size: clamp(14px, 1.1vw, 17px);
   color: #afaaad;
   line-height: 1.35;
-  max-width: 760px;
+  max-width: 680px;
 }
 
 .entry-hero-copy strong {
@@ -436,21 +439,21 @@ main {
 .entry-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  max-width: 640px;
+  gap: 7px;
+  max-width: 520px;
   margin: 0 auto;
   width: 100%;
 }
 
 .entry-tab {
   border: 1px solid #53484b;
-  border-radius: 10px;
+  border-radius: 9px;
   background: #24252c;
   color: #beb8ba;
   font: inherit;
-  font-size: clamp(17px, 1.6vw, 22px);
+  font-size: clamp(15px, 1.3vw, 20px);
   font-weight: 700;
-  padding: clamp(10px, 1vw, 14px);
+  padding: clamp(8px, 0.75vw, 12px);
   cursor: pointer;
 }
 
@@ -462,20 +465,20 @@ main {
 
 .entry-panel {
   border: 1px solid #5d484b;
-  border-radius: 13px;
+  border-radius: 12px;
   background: rgba(18, 18, 20, 0.82);
-  padding: clamp(12px, 1.5vw, 16px);
-  max-width: 760px;
+  padding: clamp(10px, 1.1vw, 14px);
+  max-width: 700px;
   margin: 0 auto;
   width: 100%;
   display: grid;
-  gap: 11px;
+  gap: 9px;
 }
 
 .entry-panel h2 {
   margin: 0;
   text-align: center;
-  font-size: clamp(22px, 2.2vw, 34px);
+  font-size: clamp(20px, 1.7vw, 28px);
   color: #fff7f8;
 }
 
@@ -484,8 +487,8 @@ main {
   border: 1px solid #313138;
   color: #ff8f9f;
   border-radius: 10px;
-  padding: clamp(10px, 1.2vw, 14px);
-  font-size: clamp(14px, 1.22vw, 20px);
+  padding: clamp(9px, 0.9vw, 12px);
+  font-size: clamp(13px, 1vw, 17px);
   line-height: 1.35;
 }
 
@@ -502,7 +505,7 @@ main {
   align-items: baseline;
   gap: 8px;
   color: #c6bcc0;
-  font-size: clamp(14px, 1.15vw, 18px);
+  font-size: clamp(13px, 0.95vw, 16px);
 }
 
 .entry-steps li span {
@@ -514,7 +517,7 @@ main {
   margin: 0;
   text-align: center;
   color: #afaaad;
-  font-size: clamp(15px, 1.2vw, 18px);
+  font-size: clamp(14px, 1vw, 16px);
 }
 
 .entry-footnote-link {
@@ -747,12 +750,12 @@ main {
 }
 
 .leaderboard-sticky {
-  position: sticky;
-  top: 116px;
+  position: static;
+  top: auto;
 }
 
 .pm-leaderboard-card {
-  max-height: calc(100vh - 126px);
+  max-height: calc(100vh - 108px);
   overflow: auto;
 }
 
@@ -1135,6 +1138,11 @@ select {
 
   .pm-content-grid {
     grid-template-columns: 1fr;
+  }
+
+  .pm-right-rail {
+    position: static;
+    top: auto;
   }
 
   .pm-hero-grid {

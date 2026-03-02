@@ -67,11 +67,6 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
   const source = filteredMarkets.length > 0 ? filteredMarkets : markets;
   const cards = useMemo(() => source.map((m) => toDisplayMarket(m)).slice(0, 60), [source]);
 
-  const topNav = useMemo(
-    () => ["Trending", "New", "Politics", "Sports", "Crypto", "Finance", "Culture", "World"],
-    []
-  );
-
   const entryContent =
     entryMode === "human"
       ? {
@@ -120,14 +115,6 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
             </Link>
           </div>
         </div>
-
-        <nav className="pm-top-nav" aria-label="Top navigation">
-          {topNav.map((item) => (
-            <button type="button" className={item === "Trending" ? "pm-nav-chip active" : "pm-nav-chip"} key={item}>
-              {item}
-            </button>
-          ))}
-        </nav>
       </section>
 
       <section className="card-surface agent-entry agent-entry-compact">
