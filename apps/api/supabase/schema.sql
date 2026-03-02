@@ -20,6 +20,7 @@ create table if not exists public.agents (
 create table if not exists public.markets (
   market_id text primary key,
   question text not null,
+  close_at bigint,
   category text not null,
   external_volume bigint not null default 0,
   local_trade_notional numeric not null default 0,
@@ -33,6 +34,8 @@ create table if not exists public.markets (
   resolved_outcome text,
   created_at timestamptz not null default now()
 );
+
+alter table public.markets add column if not exists close_at bigint;
 
 create table if not exists public.positions (
   id uuid primary key default gen_random_uuid(),
@@ -109,6 +112,7 @@ create table if not exists public.agent_proof_jti_consumed (
 
 create index if not exists idx_markets_category on public.markets(category);
 create index if not exists idx_markets_volume on public.markets(external_volume desc);
+create index if not exists idx_markets_close_at on public.markets(close_at) where resolved_outcome is null;
 create index if not exists idx_agents_owner_email on public.agents(owner_email);
 create index if not exists idx_positions_market on public.positions(market_id);
 create index if not exists idx_positions_agent on public.positions(agent_id);

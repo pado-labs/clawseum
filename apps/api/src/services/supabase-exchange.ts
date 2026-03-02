@@ -25,6 +25,7 @@ type AgentRow = {
 type MarketRow = {
   market_id: string;
   question: string;
+  close_at: number | string | null;
   category: string;
   external_volume: number | string;
   local_trade_notional: number | string;
@@ -101,6 +102,7 @@ type MarketPositionState = {
 const ORDER_RATE_WINDOW_MS = 60_000;
 const ORDER_RATE_MAX_ACTIONS = 120;
 const MAX_NET_SHARES_PER_MARKET = 20_000;
+const DEFAULT_MARKET_CLOSE_MS = Math.max(60_000, Number(process.env.DEFAULT_MARKET_CLOSE_MS ?? 7 * 24 * 60 * 60 * 1000));
 
 class DeterministicRng {
   constructor(private state: number) {}
@@ -124,6 +126,7 @@ export class SupabaseExchangeService implements ExchangeContract {
   private readonly client: SupabaseClient;
   private readonly readyPromise: Promise<void>;
   private readonly orderRateHistory = new Map<string, number[]>();
+  private resolveSweepInFlight = false;
 
   constructor() {
     const { client } = createSupabaseContext();
@@ -339,10 +342,12 @@ export class SupabaseExchangeService implements ExchangeContract {
 
   async createMarket(input: { id: string; question: string; closeAt?: number | null }): Promise<unknown> {
     await this.ready();
+    const closeAt = normalizeCloseAt(input.closeAt);
 
     const { error } = await this.client.from("markets").insert({
       market_id: input.id,
       question: input.question,
+      close_at: closeAt,
       category: "General",
       external_volume: 0,
       local_trade_notional: 0,
@@ -360,7 +365,7 @@ export class SupabaseExchangeService implements ExchangeContract {
       throw new Error(`Failed to create market: ${error.message}`);
     }
 
-    return { ok: true, marketId: input.id };
+    return { ok: true, marketId: input.id, closeAt };
   }
 
   async mintCompleteSet(input: { agentId: string; marketId: string; shares: number }): Promise<unknown> {
@@ -788,11 +793,82 @@ export class SupabaseExchangeService implements ExchangeContract {
       throw new Error(`Failed to resolve market: ${resolveError.message}`);
     }
 
+    const autoSettlement = await this.autoSettleResolvedMarket({
+      marketId: input.marketId,
+      outcome: input.outcome,
+      agentStates,
+      positionStates,
+      touchedAgents,
+    });
+
     await this.flushAgentStates(agentStates);
     await this.flushPositionStates(input.marketId, positionStates);
     await this.refreshAgentEquity([...touchedAgents]);
 
-    return { ok: true, marketId: input.marketId, outcome: input.outcome };
+    return {
+      ok: true,
+      marketId: input.marketId,
+      outcome: input.outcome,
+      autoSettlement,
+    };
+  }
+
+  async resolveExpiredMarkets(limit = 50): Promise<{
+    resolved: Array<{ marketId: string; outcome: Outcome; closeAt: number }>;
+    failed: Array<{ marketId: string; reason: string }>;
+  }> {
+    await this.ready();
+
+    if (this.resolveSweepInFlight) {
+      return { resolved: [], failed: [] };
+    }
+
+    this.resolveSweepInFlight = true;
+    try {
+      const now = Date.now();
+      const { data, error } = await this.client
+        .from("markets")
+        .select(
+          "market_id, close_at, last_trade_price, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, resolved_outcome"
+        )
+        .is("resolved_outcome", null)
+        .not("close_at", "is", null)
+        .lte("close_at", now)
+        .order("close_at", { ascending: true })
+        .limit(Math.max(1, Math.min(250, limit)));
+
+      if (error) {
+        throw new Error(`Failed to load expired markets: ${error.message}`);
+      }
+
+      const resolved: Array<{ marketId: string; outcome: Outcome; closeAt: number }> = [];
+      const failed: Array<{ marketId: string; reason: string }> = [];
+
+      for (const row of (data ?? []) as Array<{
+        market_id: string;
+        close_at: number | string | null;
+        last_trade_price: number | string | null;
+        yes_best_bid: number | string | null;
+        yes_best_ask: number | string | null;
+        no_best_bid: number | string | null;
+        no_best_ask: number | string | null;
+      }>) {
+        const closeAt = numOrNull(row.close_at);
+        if (closeAt === null) continue;
+        const outcome = impliedOutcomeFromMarket(row);
+        try {
+          await this.resolveMarket({ marketId: row.market_id, outcome });
+          resolved.push({ marketId: row.market_id, outcome, closeAt });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "unknown resolve error";
+          failed.push({ marketId: row.market_id, reason });
+        }
+      }
+
+      return { resolved, failed };
+    } finally {
+      this.resolveSweepInFlight = false;
+    }
   }
 
   async redeem(input: { agentId: string; marketId: string }): Promise<unknown> {
@@ -826,6 +902,49 @@ export class SupabaseExchangeService implements ExchangeContract {
       payout,
       outcome: market.resolved_outcome,
     };
+  }
+
+  private async autoSettleResolvedMarket(input: {
+    marketId: string;
+    outcome: Outcome;
+    agentStates: Map<string, AgentBalanceState>;
+    positionStates: Map<string, MarketPositionState>;
+    touchedAgents: Set<string>;
+  }): Promise<{ settledAgents: number; totalPayout: number }> {
+    const winner = toBookOutcome(input.outcome);
+
+    const { data, error } = await this.client
+      .from("positions")
+      .select("agent_id, yes_shares, no_shares")
+      .eq("market_id", input.marketId);
+
+    if (error) {
+      throw new Error(`Failed to load positions for auto settlement: ${error.message}`);
+    }
+
+    let settledAgents = 0;
+    let totalPayout = 0;
+
+    for (const row of data ?? []) {
+      const agentId = row.agent_id;
+      const state = await this.loadPositionState(input.marketId, agentId, input.positionStates);
+      const hadExposure = state.yes > 0 || state.no > 0;
+      if (!hadExposure) continue;
+
+      const payout = round4(winner === "yes" ? state.yes : state.no);
+      if (payout > 0) {
+        this.applyAgentDelta(input.agentStates, await this.loadAgentState(agentId, input.agentStates), payout, 0);
+      }
+
+      state.yes = 0;
+      state.no = 0;
+      state.dirty = true;
+      input.touchedAgents.add(agentId);
+      settledAgents += 1;
+      totalPayout = round4(totalPayout + payout);
+    }
+
+    return { settledAgents, totalPayout };
   }
 
   async book(input: { marketId: string; outcome: Outcome; depth?: number }): Promise<unknown> {
@@ -961,7 +1080,7 @@ export class SupabaseExchangeService implements ExchangeContract {
       this.client
         .from("markets")
         .select(
-          "market_id, question, category, external_volume, local_trade_notional, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, trade_count, last_trade_price, resolved_outcome"
+          "market_id, question, close_at, category, external_volume, local_trade_notional, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, trade_count, last_trade_price, resolved_outcome"
         )
         .is("resolved_outcome", null)
         .order("trade_count", { ascending: false })
@@ -996,17 +1115,29 @@ export class SupabaseExchangeService implements ExchangeContract {
     ]);
     const marketIds = Array.from(marketIdSet);
 
-    let marketRows: Array<{ market_id: string; question: string; resolved_outcome: Outcome | null; trade_count: number }> = [];
+    let marketRows: Array<{
+      market_id: string;
+      question: string;
+      close_at: number | string | null;
+      resolved_outcome: Outcome | null;
+      trade_count: number;
+    }> = [];
     if (marketIds.length > 0) {
       const { data, error } = await this.client
         .from("markets")
-        .select("market_id, question, resolved_outcome, trade_count")
+        .select("market_id, question, close_at, resolved_outcome, trade_count")
         .in("market_id", marketIds);
 
       if (error) {
         throw new Error(`Failed to load home market labels: ${error.message}`);
       }
-      marketRows = (data ?? []) as Array<{ market_id: string; question: string; resolved_outcome: Outcome | null; trade_count: number }>;
+      marketRows = (data ?? []) as Array<{
+        market_id: string;
+        question: string;
+        close_at: number | string | null;
+        resolved_outcome: Outcome | null;
+        trade_count: number;
+      }>;
     }
     const marketMap = new Map(marketRows.map((row) => [row.market_id, row]));
 
@@ -1062,6 +1193,7 @@ export class SupabaseExchangeService implements ExchangeContract {
         totalShares: num(row.total_shares),
       },
       market: {
+        closeAt: numOrNull(marketMap.get(row.market_id)?.close_at ?? null),
         resolvedOutcome: marketMap.get(row.market_id)?.resolved_outcome ?? null,
         tradeCount: marketMap.get(row.market_id)?.trade_count ?? 0,
       },
@@ -1085,6 +1217,7 @@ export class SupabaseExchangeService implements ExchangeContract {
       tradeCount: row.trade_count ?? 0,
       externalVolume: num(row.external_volume),
       commentCount: row.comment_count ?? 0,
+      closeAt: numOrNull(row.close_at ?? null),
       yesBestAsk: numOrNull(row.yes_best_ask),
       noBestAsk: numOrNull(row.no_best_ask),
       lastTradePrice: numOrNull(row.last_trade_price),
@@ -1236,7 +1369,7 @@ export class SupabaseExchangeService implements ExchangeContract {
     const { data, error } = await this.client
       .from("markets")
       .select(
-        "market_id, question, category, external_volume, local_trade_notional, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, trade_count, last_trade_price, resolved_outcome"
+        "market_id, question, close_at, category, external_volume, local_trade_notional, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, trade_count, last_trade_price, resolved_outcome"
       )
       .is("resolved_outcome", null)
       .order("external_volume", { ascending: false });
@@ -1326,7 +1459,7 @@ export class SupabaseExchangeService implements ExchangeContract {
     const { data: market, error: marketError } = await this.client
       .from("markets")
       .select(
-        "market_id, question, category, external_volume, local_trade_notional, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, trade_count, last_trade_price, resolved_outcome"
+        "market_id, question, close_at, category, external_volume, local_trade_notional, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, trade_count, last_trade_price, resolved_outcome"
       )
       .eq("market_id", marketId)
       .maybeSingle();
@@ -1626,6 +1759,10 @@ export class SupabaseExchangeService implements ExchangeContract {
     if (market.resolved_outcome !== null) {
       throw new Error(`Market ${marketId} is resolved`);
     }
+    const closeAt = numOrNull(market.close_at ?? null);
+    if (closeAt !== null && Date.now() >= closeAt) {
+      throw new Error(`Market ${marketId} is closed by time window; awaiting resolution`);
+    }
     return market;
   }
 
@@ -1633,7 +1770,7 @@ export class SupabaseExchangeService implements ExchangeContract {
     const { data, error } = await this.client
       .from("markets")
       .select(
-        "market_id, question, category, external_volume, local_trade_notional, trade_count, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, last_trade_price, resolved_outcome"
+        "market_id, question, close_at, category, external_volume, local_trade_notional, trade_count, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, last_trade_price, resolved_outcome"
       )
       .eq("market_id", marketId)
       .maybeSingle();
@@ -1996,6 +2133,7 @@ export class SupabaseExchangeService implements ExchangeContract {
   private toOverviewRow(row: MarketRow): {
     marketId: string;
     question: string;
+    closeAt: number | null;
     category: string;
     externalVolume: number;
     localTradeNotional: number;
@@ -2008,6 +2146,7 @@ export class SupabaseExchangeService implements ExchangeContract {
     return {
       marketId: row.market_id,
       question: row.question,
+      closeAt: numOrNull(row.close_at ?? null),
       category: row.category,
       externalVolume: num(row.external_volume),
       localTradeNotional: num(row.local_trade_notional),
@@ -2228,11 +2367,13 @@ function buildSeedSnapshot(): {
     estimatedExtras.set(agent.id, 0);
   }
 
+  const closeSeedBase = Date.now();
   let now = Date.UTC(2026, 2, 2, 12, 0, 0);
 
   polymarketActiveMarkets.forEach((input, index) => {
     const marketId = toMarketId(index + 1, input.topic);
     const rng = new DeterministicRng(hashCode(marketId));
+    const closeAt = closeSeedBase + (7 + (index % 14)) * 24 * 60 * 60 * 1000;
 
     const center = clamp(0.16 + rng.next() * 0.68, 0.08, 0.92);
     const spread = clamp(0.02 + rng.next() * 0.045, 0.02, 0.08);
@@ -2394,6 +2535,7 @@ function buildSeedSnapshot(): {
     markets.push({
       market_id: marketId,
       question: input.topic,
+      close_at: closeAt,
       category: input.category,
       external_volume: input.volume,
       local_trade_notional: round2(localTradeNotional),
@@ -2499,6 +2641,35 @@ function midpoint(bid: number | null, ask: number | null, fallback: number): num
   if (bid === null) return ask ?? fallback;
   if (ask === null) return bid;
   return (bid + ask) / 2;
+}
+
+function impliedOutcomeFromMarket(row: {
+  last_trade_price?: number | string | null;
+  yes_best_bid?: number | string | null;
+  yes_best_ask?: number | string | null;
+}): Outcome {
+  const yes = midpoint(
+    numOrNull(row.yes_best_bid ?? null),
+    numOrNull(row.yes_best_ask ?? null),
+    numOrNull(row.last_trade_price ?? null) ?? 0.5
+  );
+  return yes >= 0.5 ? "YES" : "NO";
+}
+
+function normalizeCloseAt(closeAt: number | null | undefined): number | null {
+  if (closeAt === null) return null;
+  const fallback = Date.now() + DEFAULT_MARKET_CLOSE_MS;
+  const candidate = closeAt ?? fallback;
+  if (!Number.isFinite(candidate)) {
+    throw new Error("closeAt must be a valid epoch milliseconds value");
+  }
+
+  const normalized = Math.floor(candidate);
+  const minLead = Date.now() + 10_000;
+  if (normalized < minLead) {
+    throw new Error("closeAt must be at least 10 seconds in the future");
+  }
+  return normalized;
 }
 
 function toPositionTag(yesShares: number, noShares: number): { label: string; tone: PositionTone } {

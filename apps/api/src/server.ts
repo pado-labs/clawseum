@@ -32,6 +32,36 @@ await registerAgentProofRoutes(app, exchange, agentProof);
 await registerMarketRoutes(app, exchange, agentProof);
 await registerOwnerRoutes(app, exchange, supabaseAuthClient);
 
+const autoResolveEnabled = process.env.AUTO_RESOLVE_EXPIRED_MARKETS !== "0";
+const marketCloseSweepMs = Math.max(5_000, Number(process.env.MARKET_CLOSE_SWEEP_MS ?? 15_000));
+
+if (autoResolveEnabled) {
+  const runSweep = async () => {
+    try {
+      const result = await exchange.resolveExpiredMarkets();
+      if (result.resolved.length > 0) {
+        app.log.info(
+          {
+            resolved: result.resolved.length,
+            failed: result.failed.length,
+          },
+          "Resolved expired markets"
+        );
+      } else if (result.failed.length > 0) {
+        app.log.warn({ failed: result.failed }, "Expired market resolve sweep had failures");
+      }
+    } catch (error) {
+      app.log.error(error, "Expired market resolve sweep failed");
+    }
+  };
+
+  void runSweep();
+  const timer = setInterval(() => {
+    void runSweep();
+  }, marketCloseSweepMs);
+  timer.unref();
+}
+
 app.setErrorHandler((error, _request, reply) => {
   const message = error instanceof Error ? error.message : "Unknown error";
   reply.status(400).send({
