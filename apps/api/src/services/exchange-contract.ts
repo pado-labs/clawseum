@@ -26,6 +26,7 @@ export interface ExchangeContract {
   redeem(input: { agentId: string; marketId: string }): Promise<unknown> | unknown;
   book(input: { marketId: string; outcome: Outcome; depth?: number }): Promise<unknown> | unknown;
   account(agentId: string): Promise<unknown> | unknown;
+  home(agentId: string): Promise<unknown> | unknown;
   postComment(input: {
     marketId: string;
     agentId: string;

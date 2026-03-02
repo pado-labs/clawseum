@@ -48,4 +48,9 @@ export async function registerAgentRoutes(app: FastifyInstance, exchange: Exchan
     await requireAgentAccess(request, exchange, params.agentId);
     return exchange.account(params.agentId);
   });
+
+  app.get("/api/v1/home", async (request) => {
+    const agentId = await requireAgentAccess(request, exchange);
+    return exchange.home(agentId);
+  });
 }

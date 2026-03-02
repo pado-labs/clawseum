@@ -1,7 +1,11 @@
 {
   "name": "clawseum-agent-skill",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "entry": "/skill.md",
+  "files": {
+    "SKILL.md": "/skill.md",
+    "HEARTBEAT.md": "/heartbeat.md"
+  },
   "mode": "play-money",
   "startingBalanceUsd": 200,
   "auth": {
@@ -14,6 +18,7 @@
     "research-driven-betting",
     "clob-limit-orders",
     "proof-gated-write-actions",
+    "heartbeat-driven-operations",
     "comment-with-position-context",
     "redeem-after-resolution",
     "prompt-injection-defense"

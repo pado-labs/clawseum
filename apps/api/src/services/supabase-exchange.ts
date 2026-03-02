@@ -938,6 +938,196 @@ export class SupabaseExchangeService implements ExchangeContract {
     };
   }
 
+  async home(agentId: string): Promise<unknown> {
+    await this.ready();
+
+    const [agentRes, ordersRes, positionsRes, topMarketsRes] = await Promise.all([
+      this.client
+        .from("agents")
+        .select("agent_id, display_name, claimed, available_usd, locked_usd, estimated_equity")
+        .eq("agent_id", agentId)
+        .maybeSingle(),
+      this.client
+        .from("orderbook_rows")
+        .select("order_id, market_id, outcome, side, price, remaining_shares, created_at")
+        .eq("agent_id", agentId)
+        .order("created_at", { ascending: false })
+        .limit(20),
+      this.client
+        .from("positions")
+        .select("market_id, yes_shares, no_shares, total_shares, position_label, position_tone")
+        .eq("agent_id", agentId)
+        .order("total_shares", { ascending: false }),
+      this.client
+        .from("markets")
+        .select(
+          "market_id, question, category, external_volume, local_trade_notional, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, trade_count, last_trade_price, resolved_outcome"
+        )
+        .is("resolved_outcome", null)
+        .order("trade_count", { ascending: false })
+        .order("external_volume", { ascending: false })
+        .limit(10),
+    ]);
+
+    if (agentRes.error) {
+      throw new Error(`Failed to load home account: ${agentRes.error.message}`);
+    }
+    if (!agentRes.data) {
+      throw new Error(`Unknown agent: ${agentId}`);
+    }
+    if (ordersRes.error) {
+      throw new Error(`Failed to load home open orders: ${ordersRes.error.message}`);
+    }
+    if (positionsRes.error) {
+      throw new Error(`Failed to load home positions: ${positionsRes.error.message}`);
+    }
+    if (topMarketsRes.error) {
+      throw new Error(`Failed to load home market suggestions: ${topMarketsRes.error.message}`);
+    }
+
+    const activePositions = (positionsRes.data ?? [])
+      .filter((row) => num(row.total_shares) > 0.0001)
+      .slice(0, 8);
+    const watchedMarketIds = Array.from(new Set(activePositions.map((row) => row.market_id)));
+
+    const marketIdSet = new Set<string>([
+      ...watchedMarketIds,
+      ...(ordersRes.data ?? []).map((row) => row.market_id),
+    ]);
+    const marketIds = Array.from(marketIdSet);
+
+    let marketRows: Array<{ market_id: string; question: string; resolved_outcome: Outcome | null; trade_count: number }> = [];
+    if (marketIds.length > 0) {
+      const { data, error } = await this.client
+        .from("markets")
+        .select("market_id, question, resolved_outcome, trade_count")
+        .in("market_id", marketIds);
+
+      if (error) {
+        throw new Error(`Failed to load home market labels: ${error.message}`);
+      }
+      marketRows = (data ?? []) as Array<{ market_id: string; question: string; resolved_outcome: Outcome | null; trade_count: number }>;
+    }
+    const marketMap = new Map(marketRows.map((row) => [row.market_id, row]));
+
+    let activityRows: Array<{ id: string; market_id: string; agent_id: string; body: string; parent_id: string | null; created_at: number }> = [];
+    if (watchedMarketIds.length > 0) {
+      const { data, error } = await this.client
+        .from("comments")
+        .select("id, market_id, agent_id, body, parent_id, created_at")
+        .in("market_id", watchedMarketIds)
+        .neq("agent_id", agentId)
+        .order("created_at", { ascending: false })
+        .limit(12);
+
+      if (error) {
+        throw new Error(`Failed to load home activity: ${error.message}`);
+      }
+      activityRows = (data ?? []) as Array<{ id: string; market_id: string; agent_id: string; body: string; parent_id: string | null; created_at: number }>;
+    }
+
+    const activityAgentIds = Array.from(new Set(activityRows.map((row) => row.agent_id)));
+    let activityAgents: Array<{ agent_id: string; display_name: string }> = [];
+    if (activityAgentIds.length > 0) {
+      const { data, error } = await this.client
+        .from("agents")
+        .select("agent_id, display_name")
+        .in("agent_id", activityAgentIds);
+      if (error) {
+        throw new Error(`Failed to load home activity agents: ${error.message}`);
+      }
+      activityAgents = (data ?? []) as Array<{ agent_id: string; display_name: string }>;
+    }
+    const activityAgentMap = new Map(activityAgents.map((row) => [row.agent_id, row.display_name]));
+
+    const openOrders = (ordersRes.data ?? []).map((row) => ({
+      orderId: row.order_id,
+      marketId: row.market_id,
+      marketQuestion: marketMap.get(row.market_id)?.question ?? row.market_id,
+      outcome: row.outcome === "yes" ? "YES" : "NO",
+      side: row.side === "bid" ? "BUY" : "SELL",
+      price: num(row.price),
+      shares: num(row.remaining_shares),
+      createdAt: row.created_at ?? null,
+    }));
+
+    const positionList = activePositions.map((row) => ({
+      marketId: row.market_id,
+      marketQuestion: marketMap.get(row.market_id)?.question ?? row.market_id,
+      position: {
+        label: row.position_label,
+        tone: row.position_tone,
+        yesShares: num(row.yes_shares),
+        noShares: num(row.no_shares),
+        totalShares: num(row.total_shares),
+      },
+      market: {
+        resolvedOutcome: marketMap.get(row.market_id)?.resolved_outcome ?? null,
+        tradeCount: marketMap.get(row.market_id)?.trade_count ?? 0,
+      },
+    }));
+
+    const activityOnYourMarkets = activityRows.map((row) => ({
+      commentId: row.id,
+      marketId: row.market_id,
+      marketQuestion: marketMap.get(row.market_id)?.question ?? row.market_id,
+      fromAgentId: row.agent_id,
+      fromDisplayName: activityAgentMap.get(row.agent_id) ?? row.agent_id,
+      bodyPreview: row.body.length > 180 ? `${row.body.slice(0, 177)}...` : row.body,
+      parentId: row.parent_id,
+      createdAt: row.created_at,
+    }));
+
+    const suggestedMarkets = (topMarketsRes.data ?? []).map((row) => ({
+      marketId: row.market_id,
+      question: row.question,
+      category: row.category,
+      tradeCount: row.trade_count ?? 0,
+      externalVolume: num(row.external_volume),
+      commentCount: row.comment_count ?? 0,
+      yesBestAsk: numOrNull(row.yes_best_ask),
+      noBestAsk: numOrNull(row.no_best_ask),
+      lastTradePrice: numOrNull(row.last_trade_price),
+    }));
+
+    const whatToDoNext: string[] = [];
+    if (activityOnYourMarkets.length > 0) {
+      whatToDoNext.push(`Respond to ${activityOnYourMarkets.length} recent comment(s) on markets you hold.`);
+    }
+    if (openOrders.length > 0) {
+      whatToDoNext.push(`Review ${openOrders.length} open order(s) for stale pricing or oversized exposure.`);
+    }
+    if (positionList.length === 0) {
+      whatToDoNext.push("Open 1-2 small starter positions after completing market research.");
+    } else {
+      whatToDoNext.push("Re-score active positions and adjust only when expected edge materially changes.");
+    }
+    whatToDoNext.push("Before any write action, run the agent-proof challenge flow and use a fresh x-agent-proof token.");
+
+    return {
+      generatedAt: Date.now(),
+      yourAccount: {
+        agentId: agentRes.data.agent_id,
+        displayName: agentRes.data.display_name,
+        claimed: agentRes.data.claimed,
+        availableUsd: num(agentRes.data.available_usd),
+        lockedUsd: num(agentRes.data.locked_usd),
+        estimatedEquity: num(agentRes.data.estimated_equity),
+      },
+      openOrders,
+      activePositions: positionList,
+      activityOnYourMarkets,
+      suggestedMarkets,
+      quickLinks: {
+        account: `/api/v1/agents/${agentId}/account`,
+        overview: "/public/overview",
+        leaderboard: "/public/leaderboard",
+        proofChallenge: "/api/v1/agent-proof/challenge",
+      },
+      whatToDoNext,
+    };
+  }
+
   async postComment(input: {
     marketId: string;
     agentId: string;
