@@ -197,12 +197,18 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
               <article
                 key={item.market.marketId}
                 className={`card-surface pm-market-card ${
-                  item.kind === "binary" ? "pm-market-card-binary" : "pm-market-card-multi"
+                  item.kind === "binary"
+                    ? "pm-market-card-binary"
+                    : item.kind === "threeWay"
+                      ? "pm-market-card-threeway"
+                      : "pm-market-card-multi"
                 }`}
               >
                 <div className="market-card-top">
                   <span className="mini-badge">{item.market.category}</span>
-                  <span className="mini-muted">{item.kind === "binary" ? "Yes / No" : "Multi choice"}</span>
+                  <span className="mini-muted">
+                    {item.kind === "binary" ? "Yes / No" : item.kind === "threeWay" ? "3-way (draw)" : "Multi choice"}
+                  </span>
                 </div>
 
                 <Link href={`/markets/${item.market.marketId}`} className="market-title-link">
@@ -222,6 +228,27 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                         <span>No</span>
                         <strong>{item.options[0]?.noPrice ?? 50}%</strong>
                       </Link>
+                    </div>
+                  </div>
+                ) : item.kind === "threeWay" ? (
+                  <div className="pm-card-body pm-card-body-threeway">
+                    <div className="pm-threeway-row">
+                      {item.options.map((option) => (
+                        <Link
+                          href={`/markets/${option.marketId}`}
+                          key={`${item.market.marketId}-${option.label}`}
+                          className={`pm-threeway-btn ${
+                            option.label.toLowerCase() === "draw"
+                              ? "draw"
+                              : option.chance >= item.headlineChance
+                                ? "yes"
+                                : "no"
+                          }`}
+                        >
+                          <span>{option.label}</span>
+                          <strong>{option.chance}%</strong>
+                        </Link>
+                      ))}
                     </div>
                   </div>
                 ) : (
@@ -291,13 +318,50 @@ interface DisplayOption {
 
 interface DisplayMarket {
   market: OverviewMarket;
-  kind: "binary" | "multi";
+  kind: "binary" | "multi" | "threeWay";
   headlineChance: number;
   options: DisplayOption[];
 }
 
 function toDisplayMarket(market: OverviewMarket): DisplayMarket {
   const yesMid = currentYesChance(market);
+  const fixture = parseSportsFixture(market.question);
+
+  if (market.category === "Sports" && fixture) {
+    const drawChance = clampPct(Math.round(12 + (50 - Math.abs(50 - yesMid)) * 0.28));
+    const remaining = Math.max(2, 100 - drawChance);
+    const homeChance = clampPct(Math.round((yesMid / 100) * remaining));
+    const awayChance = clampPct(100 - homeChance - drawChance);
+
+    return {
+      market,
+      kind: "threeWay",
+      headlineChance: Math.max(homeChance, drawChance, awayChance),
+      options: [
+        {
+          marketId: market.marketId,
+          label: fixture.home,
+          chance: homeChance,
+          yesPrice: homeChance,
+          noPrice: 100 - homeChance,
+        },
+        {
+          marketId: market.marketId,
+          label: "Draw",
+          chance: drawChance,
+          yesPrice: drawChance,
+          noPrice: 100 - drawChance,
+        },
+        {
+          marketId: market.marketId,
+          label: fixture.away,
+          chance: awayChance,
+          yesPrice: awayChance,
+          noPrice: 100 - awayChance,
+        },
+      ],
+    };
+  }
 
   const options = (market.multiOptions ?? [])
     .slice(0, 4)
@@ -362,4 +426,29 @@ function midPrice(bid: number | null, ask: number | null): number {
   if (bid === null) return ask ?? 0.5;
   if (ask === null) return bid;
   return (bid + ask) / 2;
+}
+
+function parseSportsFixture(question: string): { home: string; away: string } | null {
+  const cleaned = question.replace(/\?/g, "").replace(/\s+/g, " ").trim();
+  const patterns = [/(.+?)\s+vs\.?\s+(.+)/i, /(.+?)\s+[xX]\s+(.+)/];
+
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern);
+    if (!match) continue;
+    const home = normalizeFixtureLabel(match[1] ?? "");
+    const away = normalizeFixtureLabel(match[2] ?? "");
+    if (!home || !away || home.toLowerCase() === away.toLowerCase()) continue;
+    return { home, away };
+  }
+
+  return null;
+}
+
+function normalizeFixtureLabel(label: string): string {
+  const cleaned = label
+    .replace(/\b(winner|match|game|market)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length <= 20) return cleaned;
+  return `${cleaned.slice(0, 17)}...`;
 }

@@ -726,11 +726,71 @@ main {
   min-height: 190px;
 }
 
+.pm-card-body-threeway {
+  min-height: 126px;
+}
+
+.pm-threeway-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pm-threeway-btn {
+  border: 1px solid #e6c9cf;
+  border-radius: 10px;
+  padding: 9px 10px;
+  min-height: 74px;
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  justify-items: center;
+  font-size: 13px;
+  color: #7a5960;
+  background: #fff4f6;
+}
+
+.pm-threeway-btn span {
+  line-height: 1.2;
+  text-align: center;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.pm-threeway-btn strong {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.pm-threeway-btn.yes {
+  border-color: #9edab9;
+  color: #0f6c43;
+  background: #e9faef;
+}
+
+.pm-threeway-btn.no {
+  border-color: #e8b4be;
+  color: #a51c34;
+  background: #ffedf1;
+}
+
+.pm-threeway-btn.draw {
+  border-color: #d2d7e4;
+  color: #4b556f;
+  background: #f2f4fa;
+}
+
 .pm-market-card-binary .pm-card-prob {
   margin-bottom: 2px;
 }
 
 .pm-market-card-multi .pm-card-prob {
+  margin-bottom: 0;
+}
+
+.pm-market-card-threeway .pm-card-prob {
   margin-bottom: 0;
 }
 
