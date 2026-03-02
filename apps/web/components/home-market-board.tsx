@@ -205,9 +205,6 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                 >
                   <div className="market-card-top">
                     <span className="mini-badge">{item.market.category}</span>
-                    <span className="mini-muted">
-                      {item.kind === "binary" ? "Yes / No" : item.kind === "threeWay" ? "3-way (draw)" : "Multi choice"}
-                    </span>
                   </div>
 
                   <div className="pm-title-row">
