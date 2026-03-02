@@ -189,7 +189,6 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
 
           <section className="section-head" style={{ marginBottom: 2 }}>
             <h2>All markets</h2>
-            <span className="meta-note">{cards.length} shown</span>
           </section>
 
           <section className="pm-market-grid">
