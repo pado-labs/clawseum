@@ -87,7 +87,7 @@ main {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(300px, 1fr);
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .pm-top-band .agent-entry.agent-entry-compact {
@@ -96,8 +96,17 @@ main {
 }
 
 .pm-top-leaderboard {
-  max-height: 365px;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.pm-top-leaderboard-list {
+  min-height: 0;
   overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .pm-content-grid {

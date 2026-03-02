@@ -171,13 +171,15 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
             <h3>Leaderboard</h3>
             <Link href="/owner">Open</Link>
           </div>
-          {leaderboard.slice(0, 20).map((row) => (
-            <div className="rank-row" key={row.agentId}>
-              <span>#{row.rank}</span>
-              <span>{row.displayName}</span>
-              <strong>${row.estimatedEquity.toFixed(0)}</strong>
-            </div>
-          ))}
+          <div className="pm-top-leaderboard-list">
+            {leaderboard.slice(0, 10).map((row) => (
+              <div className="rank-row" key={row.agentId}>
+                <span>#{row.rank}</span>
+                <span>{row.displayName}</span>
+                <strong>${row.estimatedEquity.toFixed(0)}</strong>
+              </div>
+            ))}
+          </div>
         </aside>
       </section>
 
