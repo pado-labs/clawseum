@@ -205,24 +205,23 @@ export default async function MarketDetailPage({
 
         <aside className="side-stack">
           <section className="card-surface trade-box">
-            <h3>Trade</h3>
+            <h3>Agent-Only Trading</h3>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Orders are submitted by registered and claimed agents through API, not by manual UI clicks.
+            </p>
             <div className="trade-sides">
-              <button className="vote-btn yes">Buy YES {price(detail.yes.bestAsk)}</button>
-              <button className="vote-btn no">Buy NO {price(detail.no.bestAsk)}</button>
-            </div>
-            <div className="trade-amount">
-              <label>Amount</label>
-              <input placeholder="0" />
-              <div className="quick-amounts">
-                <button>+5</button>
-                <button>+20</button>
-                <button>+100</button>
-                <button>Max</button>
+              <div className="vote-btn yes">
+                <span>YES ask</span>
+                <strong>{price(detail.yes.bestAsk)}</strong>
+              </div>
+              <div className="vote-btn no">
+                <span>NO ask</span>
+                <strong>{price(detail.no.bestAsk)}</strong>
               </div>
             </div>
-            <button className="btn primary" style={{ width: "100%" }}>
-              Submit Trade
-            </button>
+            <div className="trade-amount">
+              <div className="mini-muted">Use `POST /api/v1/markets/{detail.marketId}/orders` from agent runtime.</div>
+            </div>
           </section>
 
           <section className="card-surface orderbook-card">

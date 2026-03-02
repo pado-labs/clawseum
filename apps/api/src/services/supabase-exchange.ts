@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Outcome, SignupRequest, SignupResponse } from "@clawseum/shared-types";
 import { polymarketActiveMarkets } from "../data/polymarket-active-markets.js";
@@ -56,6 +56,7 @@ type OrderbookRow = {
   price: number | string;
   remaining_shares: number | string;
   agent_id: string;
+  created_at?: string;
 };
 
 type TradeRow = {
@@ -85,6 +86,22 @@ type CommentRow = {
   created_at: number;
 };
 
+type AgentBalanceState = {
+  available: number;
+  locked: number;
+  dirty: boolean;
+};
+
+type MarketPositionState = {
+  yes: number;
+  no: number;
+  dirty: boolean;
+};
+
+const ORDER_RATE_WINDOW_MS = 60_000;
+const ORDER_RATE_MAX_ACTIONS = 120;
+const MAX_NET_SHARES_PER_MARKET = 20_000;
+
 class DeterministicRng {
   constructor(private state: number) {}
 
@@ -106,6 +123,7 @@ class DeterministicRng {
 export class SupabaseExchangeService implements ExchangeContract {
   private readonly client: SupabaseClient;
   private readonly readyPromise: Promise<void>;
+  private readonly orderRateHistory = new Map<string, number[]>();
 
   constructor() {
     const { client } = createSupabaseContext();
@@ -136,9 +154,20 @@ export class SupabaseExchangeService implements ExchangeContract {
     if (!data) {
       throw new Error(`Unknown agent: ${input.agentId}`);
     }
-    if (data.api_key !== input.apiKey) {
+    if (!apiKeyMatches(String(data.api_key), input.apiKey)) {
       throw new Error("Invalid API key for agent");
     }
+
+    if (!String(data.api_key).startsWith("sha256:")) {
+      const { error: upgradeError } = await this.client
+        .from("agents")
+        .update({ api_key: hashApiKey(input.apiKey) })
+        .eq("agent_id", input.agentId);
+      if (upgradeError) {
+        throw new Error(`Failed to upgrade API key hash: ${upgradeError.message}`);
+      }
+    }
+
     if (!data.claimed) {
       throw new Error("Agent must be claimed before placing orders or commenting");
     }
@@ -156,13 +185,13 @@ export class SupabaseExchangeService implements ExchangeContract {
       display_name: input.displayName,
       bio: input.bio ?? "",
       owner_email: input.ownerEmail,
-      api_key: apiKey,
+      api_key: hashApiKey(apiKey),
       verification_code: verificationCode,
       claim_url: `/claim?agentId=${id}`,
       claimed: false,
-      available_usd: 20_000,
+      available_usd: 200,
       locked_usd: 0,
-      estimated_equity: 20_000,
+      estimated_equity: 200,
     };
 
     const { error } = await this.client.from("agents").insert(payload);
@@ -236,11 +265,45 @@ export class SupabaseExchangeService implements ExchangeContract {
     return { ok: true, marketId: input.id };
   }
 
-  async mintCompleteSet(_input: { agentId: string; marketId: string; shares: number }): Promise<unknown> {
-    throw new Error("mintCompleteSet is not implemented in Supabase mode");
+  async mintCompleteSet(input: { agentId: string; marketId: string; shares: number }): Promise<unknown> {
+    await this.ready();
+
+    assertShares(input.shares);
+    await this.mustTradableMarket(input.marketId);
+
+    const shares = round4(input.shares);
+    const cost = shares;
+    const agentStates = new Map<string, AgentBalanceState>();
+    const positionStates = new Map<string, MarketPositionState>();
+
+    this.applyAgentDelta(agentStates, await this.loadAgentState(input.agentId, agentStates), -cost, 0);
+    this.applyPositionDelta(
+      positionStates,
+      await this.loadPositionState(input.marketId, input.agentId, positionStates),
+      "yes",
+      shares
+    );
+    this.applyPositionDelta(
+      positionStates,
+      await this.loadPositionState(input.marketId, input.agentId, positionStates),
+      "no",
+      shares
+    );
+
+    this.assertPositionCap(await this.loadPositionState(input.marketId, input.agentId, positionStates));
+
+    await this.flushAgentStates(agentStates);
+    await this.flushPositionStates(input.marketId, positionStates);
+    await this.refreshAgentEquity([input.agentId]);
+
+    return {
+      cost: round4(cost),
+      yesShares: shares,
+      noShares: shares,
+    };
   }
 
-  async placeOrder(_input: {
+  async placeOrder(input: {
     agentId: string;
     marketId: string;
     side: "BUY" | "SELL";
@@ -248,30 +311,423 @@ export class SupabaseExchangeService implements ExchangeContract {
     price: number;
     shares: number;
   }): Promise<unknown> {
-    throw new Error("placeOrder is not implemented in Supabase mode");
+    await this.ready();
+
+    assertPrice(input.price);
+    assertShares(input.shares);
+    this.assertOrderRateLimit(input.agentId);
+
+    const market = await this.mustTradableMarket(input.marketId);
+    const marketId = input.marketId;
+    const outcome = toBookOutcome(input.outcome);
+    const side = input.side;
+    const shares = round4(input.shares);
+    const now = Date.now();
+    const orderId = `ord_live_${randomUUID().replaceAll("-", "").slice(0, 14)}`;
+
+    const agentStates = new Map<string, AgentBalanceState>();
+    const positionStates = new Map<string, MarketPositionState>();
+    const touchedAgents = new Set<string>([input.agentId]);
+
+    const incomingState = await this.loadAgentState(input.agentId, agentStates);
+
+    if (side === "BUY") {
+      const required = round4(input.price * shares);
+      this.applyAgentDelta(agentStates, incomingState, -required, required);
+      const buyerPos = await this.loadPositionState(marketId, input.agentId, positionStates);
+      this.assertPositionCap(buyerPos, { outcome, addShares: shares });
+    } else {
+      const sellerPos = await this.loadPositionState(marketId, input.agentId, positionStates);
+      this.applyPositionDelta(positionStates, sellerPos, outcome, -shares);
+    }
+
+    const oppositeSide = side === "BUY" ? "ask" : "bid";
+    const crossingOrder = side === "BUY"
+      ? { column: "price", ascending: true as const }
+      : { column: "price", ascending: false as const };
+
+    const candidatesRes = await this.client
+      .from("orderbook_rows")
+      .select("order_id, market_id, outcome, side, price, remaining_shares, agent_id, created_at")
+      .eq("market_id", marketId)
+      .eq("outcome", outcome)
+      .eq("side", oppositeSide)
+      .order(crossingOrder.column, { ascending: crossingOrder.ascending })
+      .order("created_at", { ascending: true })
+      .limit(256);
+
+    if (candidatesRes.error) {
+      throw new Error(`Failed to load crossing book: ${candidatesRes.error.message}`);
+    }
+
+    let remaining = shares;
+    const trades: Array<{
+      id: string;
+      price: number;
+      shares: number;
+      buyerId: string;
+      sellerId: string;
+      executedAt: number;
+    }> = [];
+
+    for (const maker of (candidatesRes.data ?? []) as OrderbookRow[]) {
+      if (remaining <= 0) break;
+      if (maker.agent_id === input.agentId) continue;
+
+      const makerPrice = round4(num(maker.price));
+      const makerRemaining = round4(num(maker.remaining_shares));
+      if (makerRemaining <= 0) continue;
+
+      const crosses = side === "BUY" ? input.price >= makerPrice : input.price <= makerPrice;
+      if (!crosses) break;
+
+      let matchShares = round4(Math.min(remaining, makerRemaining));
+      if (matchShares <= 0) continue;
+
+      if (side === "BUY") {
+        const buyerPos = await this.loadPositionState(marketId, input.agentId, positionStates);
+        this.assertPositionCap(buyerPos, { outcome, addShares: matchShares });
+      } else {
+        const makerBuyerPos = await this.loadPositionState(marketId, maker.agent_id, positionStates);
+        try {
+          this.assertPositionCap(makerBuyerPos, { outcome, addShares: matchShares });
+        } catch {
+          await this.deleteOrder(maker.order_id);
+          continue;
+        }
+      }
+
+      if (side === "BUY" && !isManagedOrderId(maker.order_id)) {
+        const legacySellerPos = await this.loadPositionState(marketId, maker.agent_id, positionStates);
+        const availableLegacyShares = outcome === "yes" ? legacySellerPos.yes : legacySellerPos.no;
+        if (availableLegacyShares < matchShares) {
+          await this.deleteOrder(maker.order_id);
+          continue;
+        }
+        this.applyPositionDelta(positionStates, legacySellerPos, outcome, -matchShares);
+      }
+
+      const fillValue = round4(matchShares * makerPrice);
+      const tradeId = `trd_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
+      const executedAt = Date.now();
+
+      if (side === "BUY") {
+        const atLimit = round4(matchShares * input.price);
+        const priceImprovement = round4(atLimit - fillValue);
+
+        this.applyAgentDelta(agentStates, await this.loadAgentState(input.agentId, agentStates), priceImprovement, -atLimit);
+        this.applyAgentDelta(agentStates, await this.loadAgentState(maker.agent_id, agentStates), fillValue, 0);
+
+        this.applyPositionDelta(
+          positionStates,
+          await this.loadPositionState(marketId, input.agentId, positionStates),
+          outcome,
+          matchShares
+        );
+      } else {
+        const makerBuyerState = await this.loadAgentState(maker.agent_id, agentStates);
+        if (isManagedOrderId(maker.order_id)) {
+          if (makerBuyerState.locked < fillValue) {
+            await this.deleteOrder(maker.order_id);
+            continue;
+          }
+          this.applyAgentDelta(agentStates, makerBuyerState, 0, -fillValue);
+        } else {
+          if (makerBuyerState.available < fillValue) {
+            await this.deleteOrder(maker.order_id);
+            continue;
+          }
+          this.applyAgentDelta(agentStates, makerBuyerState, -fillValue, 0);
+        }
+
+        this.applyAgentDelta(agentStates, await this.loadAgentState(input.agentId, agentStates), fillValue, 0);
+        this.applyPositionDelta(
+          positionStates,
+          await this.loadPositionState(marketId, maker.agent_id, positionStates),
+          outcome,
+          matchShares
+        );
+      }
+
+      const nextMakerRemaining = round4(makerRemaining - matchShares);
+      if (nextMakerRemaining <= 0) {
+        await this.deleteOrder(maker.order_id);
+      } else {
+        const { error: updateMakerError } = await this.client
+          .from("orderbook_rows")
+          .update({ remaining_shares: nextMakerRemaining })
+          .eq("order_id", maker.order_id);
+        if (updateMakerError) {
+          throw new Error(`Failed to update maker order: ${updateMakerError.message}`);
+        }
+      }
+
+      const buyerId = side === "BUY" ? input.agentId : maker.agent_id;
+      const sellerId = side === "SELL" ? input.agentId : maker.agent_id;
+      touchedAgents.add(buyerId);
+      touchedAgents.add(sellerId);
+
+      const { error: tradeError } = await this.client.from("trades").insert({
+        id: tradeId,
+        market_id: marketId,
+        price: makerPrice,
+        shares: matchShares,
+        buyer_id: buyerId,
+        seller_id: sellerId,
+        executed_at: executedAt,
+      });
+
+      if (tradeError) {
+        throw new Error(`Failed to insert trade: ${tradeError.message}`);
+      }
+
+      trades.push({
+        id: tradeId,
+        price: makerPrice,
+        shares: matchShares,
+        buyerId,
+        sellerId,
+        executedAt,
+      });
+
+      remaining = round4(remaining - matchShares);
+    }
+
+    const orderStatus = remaining > 0
+      ? remaining < shares ? "PARTIAL" : "OPEN"
+      : "FILLED";
+
+    if (remaining > 0) {
+      const sideDb = side === "BUY" ? "bid" : "ask";
+      const { error: insertError } = await this.client.from("orderbook_rows").insert({
+        order_id: orderId,
+        market_id: marketId,
+        outcome,
+        side: sideDb,
+        price: round4(input.price),
+        remaining_shares: remaining,
+        agent_id: input.agentId,
+      });
+
+      if (insertError) {
+        throw new Error(`Failed to persist order: ${insertError.message}`);
+      }
+    }
+
+    await this.flushAgentStates(agentStates);
+    await this.flushPositionStates(marketId, positionStates);
+
+    if (trades.length > 0) {
+      await this.appendPriceSeriesPoints(
+        marketId,
+        trades.map((trade) => ({
+          t: trade.executedAt,
+          yesPrice: outcome === "yes" ? trade.price : round4(1 - trade.price),
+          noPrice: outcome === "yes" ? round4(1 - trade.price) : trade.price,
+        }))
+      );
+    }
+
+    const tradedShares = trades.reduce((sum, trade) => sum + trade.shares, 0);
+    const tradedNotional = trades.reduce((sum, trade) => sum + trade.shares * trade.price, 0);
+    await this.refreshMarketSnapshot(marketId, {
+      tradeCount: market.trade_count + trades.length,
+      localTradeNotional: round2(num(market.local_trade_notional) + tradedNotional),
+      lastTradePrice: trades.length > 0 ? trades[trades.length - 1]?.price ?? null : numOrNull(market.last_trade_price),
+    });
+    await this.refreshAgentEquity([...touchedAgents]);
+
+    return {
+      order: {
+        id: orderId,
+        marketId,
+        agentId: input.agentId,
+        side,
+        outcome: input.outcome,
+        price: round4(input.price),
+        shares,
+        remainingShares: remaining,
+        status: orderStatus,
+        createdAt: now,
+        updatedAt: Date.now(),
+      },
+      trades: trades.map((trade) => ({
+        id: trade.id,
+        marketId,
+        price: trade.price,
+        shares: trade.shares,
+        buyerId: trade.buyerId,
+        sellerId: trade.sellerId,
+        executedAt: trade.executedAt,
+      })),
+      tradedShares: round4(tradedShares),
+    };
   }
 
-  async cancelOrder(_input: { agentId: string; marketId: string; orderId: string }): Promise<unknown> {
-    throw new Error("cancelOrder is not implemented in Supabase mode");
+  async cancelOrder(input: { agentId: string; marketId: string; orderId: string }): Promise<unknown> {
+    await this.ready();
+
+    const { data: order, error: orderError } = await this.client
+      .from("orderbook_rows")
+      .select("order_id, market_id, outcome, side, price, remaining_shares, agent_id")
+      .eq("order_id", input.orderId)
+      .eq("market_id", input.marketId)
+      .maybeSingle();
+
+    if (orderError) {
+      throw new Error(`Failed to load order for cancel: ${orderError.message}`);
+    }
+    if (!order) {
+      throw new Error(`Unknown order: ${input.orderId}`);
+    }
+    if (order.agent_id !== input.agentId) {
+      throw new Error("Only order owner can cancel");
+    }
+
+    const remainingShares = round4(num(order.remaining_shares));
+    const agentStates = new Map<string, AgentBalanceState>();
+    const positionStates = new Map<string, MarketPositionState>();
+
+    if (remainingShares > 0 && isManagedOrderId(order.order_id)) {
+      if (order.side === "bid") {
+        const unlock = round4(num(order.price) * remainingShares);
+        this.applyAgentDelta(agentStates, await this.loadAgentState(input.agentId, agentStates), unlock, -unlock);
+      } else {
+        this.applyPositionDelta(
+          positionStates,
+          await this.loadPositionState(input.marketId, input.agentId, positionStates),
+          order.outcome,
+          remainingShares
+        );
+      }
+    }
+
+    await this.deleteOrder(order.order_id);
+    await this.flushAgentStates(agentStates);
+    await this.flushPositionStates(input.marketId, positionStates);
+    await this.refreshMarketSnapshot(input.marketId);
+    await this.refreshAgentEquity([input.agentId]);
+
+    return {
+      id: order.order_id,
+      marketId: input.marketId,
+      agentId: input.agentId,
+      side: order.side === "bid" ? "BUY" : "SELL",
+      outcome: order.outcome.toUpperCase() as Outcome,
+      price: round4(num(order.price)),
+      shares: remainingShares,
+      remainingShares: 0,
+      status: "CANCELLED",
+      updatedAt: Date.now(),
+    };
   }
 
   async resolveMarket(input: { marketId: string; outcome: Outcome }): Promise<unknown> {
     await this.ready();
 
-    const { error } = await this.client
-      .from("markets")
-      .update({ resolved_outcome: input.outcome })
+    const market = await this.mustMarket(input.marketId);
+    if (market.resolved_outcome !== null) {
+      throw new Error(`Market already resolved: ${input.marketId}`);
+    }
+
+    const [ordersRes] = await Promise.all([
+      this.client
+        .from("orderbook_rows")
+        .select("order_id, market_id, outcome, side, price, remaining_shares, agent_id")
+        .eq("market_id", input.marketId),
+    ]);
+
+    if (ordersRes.error) {
+      throw new Error(`Failed to load open orders for resolution: ${ordersRes.error.message}`);
+    }
+
+    const agentStates = new Map<string, AgentBalanceState>();
+    const positionStates = new Map<string, MarketPositionState>();
+    const touchedAgents = new Set<string>();
+
+    for (const order of (ordersRes.data ?? []) as OrderbookRow[]) {
+      const remaining = round4(num(order.remaining_shares));
+      if (remaining <= 0 || !isManagedOrderId(order.order_id)) {
+        continue;
+      }
+
+      touchedAgents.add(order.agent_id);
+
+      if (order.side === "bid") {
+        const unlock = round4(num(order.price) * remaining);
+        this.applyAgentDelta(agentStates, await this.loadAgentState(order.agent_id, agentStates), unlock, -unlock);
+      } else {
+        this.applyPositionDelta(
+          positionStates,
+          await this.loadPositionState(input.marketId, order.agent_id, positionStates),
+          order.outcome,
+          remaining
+        );
+      }
+    }
+
+    const { error: deleteOrdersError } = await this.client
+      .from("orderbook_rows")
+      .delete()
       .eq("market_id", input.marketId);
 
-    if (error) {
-      throw new Error(`Failed to resolve market: ${error.message}`);
+    if (deleteOrdersError) {
+      throw new Error(`Failed to clear orderbook on resolve: ${deleteOrdersError.message}`);
     }
+
+    const { error: resolveError } = await this.client
+      .from("markets")
+      .update({
+        resolved_outcome: input.outcome,
+        yes_best_bid: null,
+        yes_best_ask: null,
+        no_best_bid: null,
+        no_best_ask: null,
+      })
+      .eq("market_id", input.marketId);
+
+    if (resolveError) {
+      throw new Error(`Failed to resolve market: ${resolveError.message}`);
+    }
+
+    await this.flushAgentStates(agentStates);
+    await this.flushPositionStates(input.marketId, positionStates);
+    await this.refreshAgentEquity([...touchedAgents]);
 
     return { ok: true, marketId: input.marketId, outcome: input.outcome };
   }
 
-  async redeem(_input: { agentId: string; marketId: string }): Promise<unknown> {
-    throw new Error("redeem is not implemented in Supabase mode");
+  async redeem(input: { agentId: string; marketId: string }): Promise<unknown> {
+    await this.ready();
+
+    const market = await this.mustMarket(input.marketId);
+    if (market.resolved_outcome === null) {
+      throw new Error(`Market ${input.marketId} is not resolved`);
+    }
+
+    const winner = toBookOutcome(market.resolved_outcome);
+    const positionStates = new Map<string, MarketPositionState>();
+    const agentStates = new Map<string, AgentBalanceState>();
+    const position = await this.loadPositionState(input.marketId, input.agentId, positionStates);
+    const winningShares = winner === "yes" ? position.yes : position.no;
+    const payout = round4(winningShares);
+
+    if (payout > 0) {
+      this.applyAgentDelta(agentStates, await this.loadAgentState(input.agentId, agentStates), payout, 0);
+    }
+
+    position.yes = 0;
+    position.no = 0;
+    position.dirty = true;
+
+    await this.flushAgentStates(agentStates);
+    await this.flushPositionStates(input.marketId, positionStates);
+    await this.refreshAgentEquity([input.agentId]);
+
+    return {
+      payout,
+      outcome: market.resolved_outcome,
+    };
   }
 
   async book(input: { marketId: string; outcome: Outcome; depth?: number }): Promise<unknown> {
@@ -325,7 +781,7 @@ export class SupabaseExchangeService implements ExchangeContract {
   async account(agentId: string): Promise<unknown> {
     await this.ready();
 
-    const [agentRes, posRes] = await Promise.all([
+    const [agentRes, posRes, askLocksRes] = await Promise.all([
       this.client
         .from("agents")
         .select("agent_id, available_usd, locked_usd")
@@ -335,6 +791,11 @@ export class SupabaseExchangeService implements ExchangeContract {
         .from("positions")
         .select("market_id, yes_shares, no_shares")
         .eq("agent_id", agentId),
+      this.client
+        .from("orderbook_rows")
+        .select("market_id, outcome, side, remaining_shares, order_id")
+        .eq("agent_id", agentId)
+        .eq("side", "ask"),
     ]);
 
     if (agentRes.error) {
@@ -346,12 +807,28 @@ export class SupabaseExchangeService implements ExchangeContract {
     if (posRes.error) {
       throw new Error(`Failed to load positions: ${posRes.error.message}`);
     }
+    if (askLocksRes.error) {
+      throw new Error(`Failed to load open ask locks: ${askLocksRes.error.message}`);
+    }
+
+    const lockedByMarket = new Map<string, { yes: number; no: number }>();
+    for (const row of askLocksRes.data ?? []) {
+      if (!isManagedOrderId(row.order_id)) continue;
+      const bucket = lockedByMarket.get(row.market_id) ?? { yes: 0, no: 0 };
+      if (row.outcome === "yes") {
+        bucket.yes = round4(bucket.yes + num(row.remaining_shares));
+      } else {
+        bucket.no = round4(bucket.no + num(row.remaining_shares));
+      }
+      lockedByMarket.set(row.market_id, bucket);
+    }
 
     const positions: Record<string, { YES: { available: number; locked: number }; NO: { available: number; locked: number } }> = {};
     for (const row of posRes.data ?? []) {
+      const locks = lockedByMarket.get(row.market_id) ?? { yes: 0, no: 0 };
       positions[row.market_id] = {
-        YES: { available: num(row.yes_shares), locked: 0 },
-        NO: { available: num(row.no_shares), locked: 0 },
+        YES: { available: num(row.yes_shares), locked: locks.yes },
+        NO: { available: num(row.no_shares), locked: locks.no },
       };
     }
 
@@ -756,6 +1233,406 @@ export class SupabaseExchangeService implements ExchangeContract {
     }));
   }
 
+  private assertOrderRateLimit(agentId: string): void {
+    const now = Date.now();
+    const history = this.orderRateHistory.get(agentId) ?? [];
+    const threshold = now - ORDER_RATE_WINDOW_MS;
+    const recent = history.filter((t) => t >= threshold);
+
+    if (recent.length >= ORDER_RATE_MAX_ACTIONS) {
+      throw new Error(`Rate limit exceeded: max ${ORDER_RATE_MAX_ACTIONS} order actions per minute`);
+    }
+
+    recent.push(now);
+    this.orderRateHistory.set(agentId, recent);
+  }
+
+  private assertPositionCap(
+    position: MarketPositionState,
+    extra: { outcome: "yes" | "no"; addShares: number } | null = null
+  ): void {
+    const addYes = extra?.outcome === "yes" ? extra.addShares : 0;
+    const addNo = extra?.outcome === "no" ? extra.addShares : 0;
+    const nextYes = round4(position.yes + addYes);
+    const nextNo = round4(position.no + addNo);
+    const net = Math.abs(nextYes - nextNo);
+    if (net > MAX_NET_SHARES_PER_MARKET) {
+      throw new Error(`Position limit exceeded: net shares per market cannot exceed ${MAX_NET_SHARES_PER_MARKET}`);
+    }
+  }
+
+  private async mustTradableMarket(marketId: string): Promise<MarketRow> {
+    const market = await this.mustMarket(marketId);
+    if (market.resolved_outcome !== null) {
+      throw new Error(`Market ${marketId} is resolved`);
+    }
+    return market;
+  }
+
+  private async mustMarket(marketId: string): Promise<MarketRow> {
+    const { data, error } = await this.client
+      .from("markets")
+      .select(
+        "market_id, question, category, external_volume, local_trade_notional, trade_count, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, last_trade_price, resolved_outcome"
+      )
+      .eq("market_id", marketId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to load market: ${error.message}`);
+    }
+    if (!data) {
+      throw new Error(`Unknown market: ${marketId}`);
+    }
+    return data as MarketRow;
+  }
+
+  private async loadAgentState(
+    agentId: string,
+    cache: Map<string, AgentBalanceState>
+  ): Promise<AgentBalanceState> {
+    const cached = cache.get(agentId);
+    if (cached) return cached;
+
+    const { data, error } = await this.client
+      .from("agents")
+      .select("available_usd, locked_usd")
+      .eq("agent_id", agentId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to load agent balance: ${error.message}`);
+    }
+    if (!data) {
+      throw new Error(`Unknown agent: ${agentId}`);
+    }
+
+    const next: AgentBalanceState = {
+      available: round4(num(data.available_usd)),
+      locked: round4(num(data.locked_usd)),
+      dirty: false,
+    };
+    cache.set(agentId, next);
+    return next;
+  }
+
+  private applyAgentDelta(
+    cache: Map<string, AgentBalanceState>,
+    state: AgentBalanceState,
+    availableDelta: number,
+    lockedDelta: number
+  ): void {
+    const nextAvailable = round4(state.available + availableDelta);
+    const nextLocked = round4(state.locked + lockedDelta);
+    if (nextAvailable < -1e-8 || nextLocked < -1e-8) {
+      throw new Error("Insufficient balance for requested action");
+    }
+
+    state.available = nextAvailable < 0 ? 0 : nextAvailable;
+    state.locked = nextLocked < 0 ? 0 : nextLocked;
+    state.dirty = true;
+
+    const cachedEntry = [...cache.entries()].find(([, item]) => item === state);
+    if (cachedEntry) {
+      cache.set(cachedEntry[0], state);
+    }
+  }
+
+  private async flushAgentStates(cache: Map<string, AgentBalanceState>): Promise<void> {
+    for (const [agentId, state] of cache.entries()) {
+      if (!state.dirty) continue;
+      const { error } = await this.client
+        .from("agents")
+        .update({
+          available_usd: round4(state.available),
+          locked_usd: round4(state.locked),
+        })
+        .eq("agent_id", agentId);
+
+      if (error) {
+        throw new Error(`Failed to update agent balance: ${error.message}`);
+      }
+      state.dirty = false;
+    }
+  }
+
+  private async loadPositionState(
+    marketId: string,
+    agentId: string,
+    cache: Map<string, MarketPositionState>
+  ): Promise<MarketPositionState> {
+    const key = `${marketId}:${agentId}`;
+    const cached = cache.get(key);
+    if (cached) return cached;
+
+    const { data, error } = await this.client
+      .from("positions")
+      .select("yes_shares, no_shares")
+      .eq("market_id", marketId)
+      .eq("agent_id", agentId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to load position: ${error.message}`);
+    }
+
+    const state: MarketPositionState = {
+      yes: round4(num(data?.yes_shares ?? 0)),
+      no: round4(num(data?.no_shares ?? 0)),
+      dirty: false,
+    };
+    cache.set(key, state);
+    return state;
+  }
+
+  private applyPositionDelta(
+    cache: Map<string, MarketPositionState>,
+    state: MarketPositionState,
+    outcome: "yes" | "no",
+    delta: number
+  ): void {
+    if (outcome === "yes") {
+      const nextYes = round4(state.yes + delta);
+      if (nextYes < -1e-8) {
+        throw new Error("Insufficient YES shares for requested action");
+      }
+      state.yes = nextYes < 0 ? 0 : nextYes;
+    } else {
+      const nextNo = round4(state.no + delta);
+      if (nextNo < -1e-8) {
+        throw new Error("Insufficient NO shares for requested action");
+      }
+      state.no = nextNo < 0 ? 0 : nextNo;
+    }
+
+    state.dirty = true;
+    const cachedEntry = [...cache.entries()].find(([, item]) => item === state);
+    if (cachedEntry) {
+      cache.set(cachedEntry[0], state);
+    }
+  }
+
+  private async flushPositionStates(marketId: string, cache: Map<string, MarketPositionState>): Promise<void> {
+    for (const [key, state] of cache.entries()) {
+      if (!state.dirty) continue;
+      const [rowMarketId, agentId] = key.split(":");
+      if (rowMarketId !== marketId || !agentId) continue;
+      const totalShares = round2(state.yes + state.no);
+      const tag = toPositionTag(state.yes, state.no);
+
+      const { error } = await this.client.from("positions").upsert(
+        {
+          market_id: marketId,
+          agent_id: agentId,
+          yes_shares: round2(state.yes),
+          no_shares: round2(state.no),
+          total_shares: totalShares,
+          position_label: tag.label,
+          position_tone: tag.tone,
+        },
+        { onConflict: "market_id,agent_id" }
+      );
+
+      if (error) {
+        throw new Error(`Failed to upsert position: ${error.message}`);
+      }
+
+      state.dirty = false;
+    }
+  }
+
+  private async deleteOrder(orderId: string): Promise<void> {
+    const { error } = await this.client
+      .from("orderbook_rows")
+      .delete()
+      .eq("order_id", orderId);
+
+    if (error) {
+      throw new Error(`Failed to delete order ${orderId}: ${error.message}`);
+    }
+  }
+
+  private async appendPriceSeriesPoints(
+    marketId: string,
+    rows: Array<{ t: number; yesPrice: number; noPrice: number }>
+  ): Promise<void> {
+    if (rows.length === 0) return;
+
+    const { data: lastRow, error: lastError } = await this.client
+      .from("price_series")
+      .select("point_index")
+      .eq("market_id", marketId)
+      .order("point_index", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (lastError) {
+      throw new Error(`Failed to load price series index: ${lastError.message}`);
+    }
+
+    let pointIndex = (lastRow?.point_index ?? -1) + 1;
+    const payload = rows.map((row) => {
+      const item = {
+        market_id: marketId,
+        point_index: pointIndex,
+        t: row.t,
+        yes_price: round4(row.yesPrice),
+        no_price: round4(row.noPrice),
+      };
+      pointIndex += 1;
+      return item;
+    });
+
+    const { error } = await this.client.from("price_series").insert(payload);
+    if (error) {
+      throw new Error(`Failed to append price series: ${error.message}`);
+    }
+  }
+
+  private async refreshMarketSnapshot(
+    marketId: string,
+    patch?: {
+      tradeCount?: number;
+      localTradeNotional?: number;
+      lastTradePrice?: number | null;
+    }
+  ): Promise<void> {
+    const [yesBidRes, yesAskRes, noBidRes, noAskRes] = await Promise.all([
+      this.client
+        .from("orderbook_rows")
+        .select("price")
+        .eq("market_id", marketId)
+        .eq("outcome", "yes")
+        .eq("side", "bid")
+        .order("price", { ascending: false })
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+      this.client
+        .from("orderbook_rows")
+        .select("price")
+        .eq("market_id", marketId)
+        .eq("outcome", "yes")
+        .eq("side", "ask")
+        .order("price", { ascending: true })
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+      this.client
+        .from("orderbook_rows")
+        .select("price")
+        .eq("market_id", marketId)
+        .eq("outcome", "no")
+        .eq("side", "bid")
+        .order("price", { ascending: false })
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+      this.client
+        .from("orderbook_rows")
+        .select("price")
+        .eq("market_id", marketId)
+        .eq("outcome", "no")
+        .eq("side", "ask")
+        .order("price", { ascending: true })
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    for (const result of [yesBidRes, yesAskRes, noBidRes, noAskRes]) {
+      if (result.error) {
+        throw new Error(`Failed to refresh market best prices: ${result.error.message}`);
+      }
+    }
+
+    const updatePayload: Record<string, number | null> = {
+      yes_best_bid: numOrNull(yesBidRes.data?.price ?? null),
+      yes_best_ask: numOrNull(yesAskRes.data?.price ?? null),
+      no_best_bid: numOrNull(noBidRes.data?.price ?? null),
+      no_best_ask: numOrNull(noAskRes.data?.price ?? null),
+    };
+
+    if (patch?.tradeCount !== undefined) {
+      updatePayload.trade_count = patch.tradeCount;
+    }
+    if (patch?.localTradeNotional !== undefined) {
+      updatePayload.local_trade_notional = round2(patch.localTradeNotional);
+    }
+    if (patch?.lastTradePrice !== undefined) {
+      updatePayload.last_trade_price = patch.lastTradePrice === null ? null : round4(patch.lastTradePrice);
+    }
+
+    const { error } = await this.client
+      .from("markets")
+      .update(updatePayload)
+      .eq("market_id", marketId);
+
+    if (error) {
+      throw new Error(`Failed to update market snapshot: ${error.message}`);
+    }
+  }
+
+  private async refreshAgentEquity(agentIds: string[]): Promise<void> {
+    const uniqueAgentIds = Array.from(new Set(agentIds.filter(Boolean)));
+    if (uniqueAgentIds.length === 0) return;
+
+    for (const agentId of uniqueAgentIds) {
+      const [agentRes, positionsRes] = await Promise.all([
+        this.client
+          .from("agents")
+          .select("available_usd, locked_usd")
+          .eq("agent_id", agentId)
+          .maybeSingle(),
+        this.client
+          .from("positions")
+          .select("market_id, yes_shares, no_shares")
+          .eq("agent_id", agentId),
+      ]);
+
+      if (agentRes.error) {
+        throw new Error(`Failed to refresh agent equity: ${agentRes.error.message}`);
+      }
+      if (!agentRes.data) continue;
+      if (positionsRes.error) {
+        throw new Error(`Failed to refresh agent positions for equity: ${positionsRes.error.message}`);
+      }
+
+      const marketIds = Array.from(new Set((positionsRes.data ?? []).map((row) => row.market_id)));
+      const marketPriceMap = new Map<string, number>();
+      if (marketIds.length > 0) {
+        const { data: marketRows, error: marketRowsError } = await this.client
+          .from("markets")
+          .select("market_id, last_trade_price")
+          .in("market_id", marketIds);
+        if (marketRowsError) {
+          throw new Error(`Failed to refresh market marks for equity: ${marketRowsError.message}`);
+        }
+        for (const marketRow of marketRows ?? []) {
+          const mark = numOrNull(marketRow.last_trade_price);
+          marketPriceMap.set(marketRow.market_id, mark ?? 0.5);
+        }
+      }
+
+      const markToMarket = (positionsRes.data ?? []).reduce((sum, row) => {
+        const yes = num(row.yes_shares);
+        const no = num(row.no_shares);
+        const mark = marketPriceMap.get(row.market_id) ?? 0.5;
+        return sum + yes * mark + no * (1 - mark);
+      }, 0);
+
+      const estimatedEquity = round2(num(agentRes.data.available_usd) + num(agentRes.data.locked_usd) + markToMarket);
+      const { error: updateError } = await this.client
+        .from("agents")
+        .update({ estimated_equity: estimatedEquity })
+        .eq("agent_id", agentId);
+
+      if (updateError) {
+        throw new Error(`Failed to update estimated equity: ${updateError.message}`);
+      }
+    }
+  }
+
   private toOverviewRow(row: MarketRow): {
     marketId: string;
     question: string;
@@ -970,7 +1847,7 @@ function buildSeedSnapshot(): {
     display_name: a.displayName,
     bio: "seed agent",
     owner_email: `${a.id}@clawseum.local`,
-    api_key: `seed_${a.id}`,
+    api_key: hashApiKey(`seed_${a.id}`),
     verification_code: "SEED0000",
     claim_url: `/claim?agentId=${a.id}`,
     claimed: true,
@@ -1318,6 +2195,48 @@ function commentTemplatesForCategory(category: string, topic: string): string[] 
 function hashCode(input: string): number {
   const digest = createHash("sha1").update(input).digest("hex").slice(0, 8);
   return Number.parseInt(digest, 16) || 1;
+}
+
+function hashApiKey(apiKey: string): string {
+  const digest = createHash("sha256").update(apiKey).digest("hex");
+  return `sha256:${digest}`;
+}
+
+function apiKeyMatches(stored: string, provided: string): boolean {
+  if (stored.startsWith("sha256:")) {
+    const hashed = hashApiKey(provided);
+    return safeEq(stored, hashed);
+  }
+  return safeEq(stored, provided);
+}
+
+function safeEq(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
+
+function toBookOutcome(outcome: Outcome): "yes" | "no" {
+  if (outcome === "YES") return "yes";
+  if (outcome === "NO") return "no";
+  throw new Error(`Invalid outcome: ${outcome}`);
+}
+
+function isManagedOrderId(orderId: string): boolean {
+  return orderId.startsWith("ord_live_");
+}
+
+function assertPrice(price: number): void {
+  if (!Number.isFinite(price) || price <= 0 || price >= 1) {
+    throw new Error("price must be between 0 and 1");
+  }
+}
+
+function assertShares(shares: number): void {
+  if (!Number.isFinite(shares) || shares <= 0) {
+    throw new Error("shares must be greater than 0");
+  }
 }
 
 function num(v: number | string | null): number {

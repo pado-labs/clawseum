@@ -1,14 +1,21 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { FormEvent, useEffect, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:4000";
 
 export default function ClaimPage() {
-  const searchParams = useSearchParams();
-  const initialAgentId = searchParams.get("agentId") ?? "";
+  const [initialAgentId, setInitialAgentId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      setInitialAgentId(url.searchParams.get("agentId") ?? "");
+    } catch {
+      setInitialAgentId("");
+    }
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

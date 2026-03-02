@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "agent:cycle": "tsx src/scripts/agent-cycle.ts",
     "seed:supabase": "tsx src/scripts/seed-supabase.ts",
     "seed:supabase:force": "tsx src/scripts/seed-supabase.ts --force"
   },

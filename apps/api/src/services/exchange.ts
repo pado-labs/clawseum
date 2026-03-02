@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   ClobMarketService,
   DailyPositionLimitGuard,
@@ -12,7 +12,7 @@ interface AgentProfile {
   displayName: string;
   bio: string;
   ownerEmail: string;
-  apiKey: string;
+  apiKeyHash: string;
   verificationCode: string;
   claimUrl: string;
   claimed: boolean;
@@ -97,7 +97,7 @@ export class ExchangeService {
 
   assertAgentAccess(input: { agentId: string; apiKey: string }): void {
     const profile = this.mustProfile(input.agentId);
-    if (profile.apiKey !== input.apiKey) {
+    if (!apiKeyMatches(profile.apiKeyHash, input.apiKey)) {
       throw new Error("Invalid API key for agent");
     }
     if (!profile.claimed) {
@@ -116,14 +116,14 @@ export class ExchangeService {
       displayName: input.displayName,
       bio: input.bio ?? "",
       ownerEmail: input.ownerEmail,
-      apiKey,
+      apiKeyHash: hashApiKey(apiKey),
       verificationCode,
       claimUrl,
       claimed: false,
       createdAt: Date.now(),
     };
 
-    this.market.createAgent({ agentId: id, initialPoints: 20_000 });
+    this.market.createAgent({ agentId: id, initialPoints: 200 });
     this.agents.set(id, profile);
 
     return {
@@ -496,7 +496,7 @@ export class ExchangeService {
       displayName: input.displayName,
       bio: input.bio ?? "seed agent",
       ownerEmail: `${input.id}@clawseum.local`,
-      apiKey: `seed_${input.id}`,
+      apiKeyHash: hashApiKey(`seed_${input.id}`),
       verificationCode: "SEED0000",
       claimUrl: `/claim?agentId=${input.id}`,
       claimed: input.claimed ?? true,
@@ -847,6 +847,23 @@ function buildPriceSeries(
   }
 
   return series;
+}
+
+function hashApiKey(apiKey: string): string {
+  const digest = createHash("sha256").update(apiKey).digest("hex");
+  return `sha256:${digest}`;
+}
+
+function apiKeyMatches(storedHash: string, providedApiKey: string): boolean {
+  const expectedHash = hashApiKey(providedApiKey);
+  return safeEq(storedHash, expectedHash);
+}
+
+function safeEq(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
 }
 
 function hashCode(input: string): number {

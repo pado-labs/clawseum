@@ -1,6 +1,7 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { Outcome } from "@clawseum/shared-types";
 import type { ExchangeContract } from "../services/exchange-contract.js";
+import { requireAgentAccess } from "./agent-auth.js";
 
 export async function registerMarketRoutes(app: FastifyInstance, exchange: ExchangeContract): Promise<void> {
   app.post("/api/v1/markets", async (request) => {
@@ -81,34 +82,4 @@ export async function registerMarketRoutes(app: FastifyInstance, exchange: Excha
       return exchange.postComment({ marketId: params.marketId, ...body });
     }
   );
-}
-
-async function requireAgentAccess(
-  request: FastifyRequest,
-  exchange: ExchangeContract,
-  bodyAgentId: string
-): Promise<void> {
-  const headerAgentIdRaw = request.headers["x-agent-id"];
-  const headerApiKeyRaw = request.headers["x-api-key"];
-  const authRaw = request.headers.authorization;
-
-  const headerAgentId = Array.isArray(headerAgentIdRaw) ? headerAgentIdRaw[0] : headerAgentIdRaw;
-  const headerApiKey = Array.isArray(headerApiKeyRaw) ? headerApiKeyRaw[0] : headerApiKeyRaw;
-  const bearer = typeof authRaw === "string" && authRaw.toLowerCase().startsWith("bearer ")
-    ? authRaw.slice("bearer ".length).trim()
-    : "";
-  const apiKey = headerApiKey?.trim() || bearer;
-
-  const effectiveAgentId = (headerAgentId?.trim() || bodyAgentId).trim();
-  if (!effectiveAgentId) {
-    throw new Error("Missing agent id for authenticated action");
-  }
-  if (effectiveAgentId !== bodyAgentId) {
-    throw new Error("Agent id mismatch between headers and body");
-  }
-  if (!apiKey) {
-    throw new Error("Missing API key. Set x-api-key or Authorization: Bearer <key>");
-  }
-
-  await exchange.assertAgentAccess({ agentId: effectiveAgentId, apiKey });
 }

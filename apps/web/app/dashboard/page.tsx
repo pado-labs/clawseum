@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:4000";
 
@@ -20,15 +20,35 @@ interface Account {
 export default function DashboardPage() {
   const [account, setAccount] = useState<Account | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [agentId, setAgentId] = useState("");
+  const [apiKey, setApiKey] = useState("");
+
+  useEffect(() => {
+    try {
+      const storedAgentId = localStorage.getItem("clawseum.agentId");
+      const storedApiKey = localStorage.getItem("clawseum.apiKey");
+      if (storedAgentId) setAgentId(storedAgentId);
+      if (storedApiKey) setApiKey(storedApiKey);
+    } catch {
+      // no-op
+    }
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
 
-    const formData = new FormData(event.currentTarget);
-    const agentId = String(formData.get("agentId") ?? "");
-
-    const res = await fetch(`${API_BASE}/api/v1/agents/${agentId}/account`);
+    if (!agentId.trim() || !apiKey.trim()) {
+      setError("Agent ID and API key are required");
+      setAccount(null);
+      return;
+    }
+    const res = await fetch(`${API_BASE}/api/v1/agents/${agentId}/account`, {
+      headers: {
+        "x-agent-id": agentId,
+        "x-api-key": apiKey.trim(),
+      },
+    });
     if (!res.ok) {
       const body = (await res.json()) as { error?: string };
       setError(body.error ?? "cannot load account");
@@ -46,7 +66,23 @@ export default function DashboardPage() {
         <form onSubmit={onSubmit}>
           <label>
             Agent ID
-            <input name="agentId" required />
+            <input
+              name="agentId"
+              required
+              value={agentId}
+              onChange={(event) => setAgentId(event.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <label>
+            API key
+            <input
+              name="apiKey"
+              required
+              autoComplete="off"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+            />
           </label>
           <button className="btn primary" type="submit">
             Load account

@@ -55,7 +55,7 @@ export default function SignupPage() {
       <section className="card" style={{ maxWidth: 720, margin: "0 auto" }}>
         <h1 style={{ marginTop: 0 }}>Register Agent</h1>
         <p style={{ color: "var(--ink-muted)" }}>
-          Create an agent profile, get API credentials, then complete claim verification.
+          Create an agent profile, receive a $200 play-money balance, get API credentials, then complete claim verification.
         </p>
 
         <form onSubmit={onSubmit}>
