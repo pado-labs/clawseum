@@ -191,9 +191,6 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
             {cards.map((item) => {
               const chanceTone = item.headlineChance >= 50 ? "up" : "down";
               const marketHref = `/markets/${item.market.marketId}`;
-              const status = marketStatus(item.market);
-              const labels = binaryLabels(item.market.question);
-              const iconTone = categoryTone(item.market.category);
 
               return (
                 <article
@@ -206,10 +203,11 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                         : "pm-market-card-multi"
                   }`}
                 >
-                  <div className="pm-card-header">
-                    <div className={`market-icon ${iconTone}`}>
-                      {categoryGlyph(item.market.category)}
-                    </div>
+                  <div className="market-card-top">
+                    <span className="mini-badge">{item.market.category}</span>
+                  </div>
+
+                  <div className="pm-title-row">
                     <Link href={marketHref} className="market-title-link">
                       {item.market.question}
                     </Link>
@@ -219,7 +217,7 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                     >
                       <div className="pm-chance-ring-inner">
                         <strong>{item.headlineChance}%</strong>
-                        <span>{chanceLabel(item)}</span>
+                        <span>chance</span>
                       </div>
                     </div>
                   </div>
@@ -228,10 +226,12 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                     <div className="pm-card-body pm-card-body-binary">
                       <div className="vote-row">
                         <Link href={marketHref} className="vote-btn yes">
-                          <span>{labels.yes}</span>
+                          <span>Yes</span>
+                          <strong>{item.options[0]?.yesPrice ?? 50}%</strong>
                         </Link>
                         <Link href={marketHref} className="vote-btn no">
-                          <span>{labels.no}</span>
+                          <span>No</span>
+                          <strong>{item.options[0]?.noPrice ?? 50}%</strong>
                         </Link>
                       </div>
                     </div>
@@ -251,18 +251,17 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                             }`}
                           >
                             <span>{option.label}</span>
+                            <strong>{option.chance}%</strong>
                           </Link>
                         ))}
                       </div>
                     </div>
                   ) : (
                     <div className="pm-card-body pm-card-body-multi">
-                      <div className="pm-card-options-scroll">
-                        {item.options.slice(0, 5).map((option) => (
+                      <div className="pm-card-options">
+                        {item.options.slice(0, 3).map((option) => (
                           <div className="pm-option-row" key={option.label}>
-                            <Link href={`/markets/${option.marketId}`} className="pm-option-label">
-                              {option.label}
-                            </Link>
+                            <span className="pm-option-label">{option.label}</span>
                             <strong className="pm-option-chance">{option.chance}%</strong>
                             <div className="pm-option-actions">
                               <Link href={`/markets/${option.marketId}`} className="mini-yes">
@@ -279,19 +278,9 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                   )}
 
                   <div className="market-foot">
-                    <div className="market-foot-left">
-                      {status ? <span className={`market-status ${status.tone}`}>{status.label}</span> : null}
-                      {status ? <span className="market-foot-dot">·</span> : null}
-                      <span>${compact(item.market.externalVolume)} Vol.</span>
-                    </div>
-                    <div className="market-foot-actions">
-                      <button className="market-foot-icon" aria-label="Rewards" type="button">
-                        G
-                      </button>
-                      <button className="market-foot-icon" aria-label="Bookmark" type="button">
-                        B
-                      </button>
-                    </div>
+                    <span>${compact(item.market.externalVolume)} Vol.</span>
+                    <span>{item.market.tradeCount} trades</span>
+                    <span>{item.market.commentCount} comments</span>
                   </div>
                 </article>
               );
@@ -468,50 +457,4 @@ function normalizeFixtureLabel(label: string): string {
     .trim();
   if (cleaned.length <= 20) return cleaned;
   return `${cleaned.slice(0, 17)}...`;
-}
-
-function categoryGlyph(category: string): string {
-  const lower = category.toLowerCase();
-  if (lower.includes("crypto")) return "CR";
-  if (lower.includes("sport")) return "SP";
-  if (lower.includes("politic")) return "PO";
-  if (lower.includes("macro")) return "MA";
-  return category.slice(0, 2).toUpperCase();
-}
-
-function categoryTone(category: string): "crypto" | "sports" | "politics" | "default" {
-  const lower = category.toLowerCase();
-  if (lower.includes("crypto")) return "crypto";
-  if (lower.includes("sport")) return "sports";
-  if (lower.includes("politic")) return "politics";
-  return "default";
-}
-
-function chanceLabel(item: DisplayMarket): string {
-  if (item.kind === "binary") return "chance";
-  if (item.kind === "threeWay") return "top";
-  return (item.options[0]?.label ?? "top").slice(0, 10);
-}
-
-function binaryLabels(question: string): { yes: string; no: string } {
-  const lower = question.toLowerCase();
-  if (/\bup(?:\s+or\s+|\/)down\b/.test(lower)) return { yes: "Up", no: "Down" };
-  if (/\bover(?:\s+or\s+|\/)under\b/.test(lower)) return { yes: "Over", no: "Under" };
-  return { yes: "Yes", no: "No" };
-}
-
-function marketStatus(market: OverviewMarket): { label: "LIVE" | "NEW"; tone: "live" | "new" } | null {
-  const closeAtMs = toEpochMs(market.closeAt);
-  if (closeAtMs && closeAtMs > Date.now() && closeAtMs - Date.now() <= 6 * 60 * 60 * 1000) {
-    return { label: "LIVE", tone: "live" };
-  }
-  if (market.tradeCount <= 6) {
-    return { label: "NEW", tone: "new" };
-  }
-  return null;
-}
-
-function toEpochMs(value: number | null | undefined): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
-  return value > 1_000_000_000_000 ? value : value * 1000;
 }
