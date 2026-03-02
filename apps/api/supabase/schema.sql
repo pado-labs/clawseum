@@ -93,6 +93,7 @@ create table if not exists public.comments (
 
 create index if not exists idx_markets_category on public.markets(category);
 create index if not exists idx_markets_volume on public.markets(external_volume desc);
+create index if not exists idx_agents_owner_email on public.agents(owner_email);
 create index if not exists idx_positions_market on public.positions(market_id);
 create index if not exists idx_positions_agent on public.positions(agent_id);
 create index if not exists idx_orderbook_market on public.orderbook_rows(market_id, outcome, side, price);

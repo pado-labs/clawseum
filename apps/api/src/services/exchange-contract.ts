@@ -4,6 +4,13 @@ export interface ExchangeContract {
   assertAgentAccess(input: { agentId: string; apiKey: string }): Promise<void> | void;
   registerAgent(input: SignupRequest): Promise<SignupResponse> | SignupResponse;
   claim(input: { agentId: string; verificationCode: string }): Promise<{ claimed: boolean }> | { claimed: boolean };
+  claimByOwner(input: {
+    agentId: string;
+    verificationCode: string;
+    ownerEmail: string;
+  }): Promise<{ claimed: boolean }> | { claimed: boolean };
+  ownerAgents(ownerEmail: string): Promise<unknown> | unknown;
+  rotateAgentApiKey(input: { ownerEmail: string; agentId: string }): Promise<unknown> | unknown;
   createMarket(input: { id: string; question: string; closeAt?: number | null }): Promise<unknown> | unknown;
   mintCompleteSet(input: { agentId: string; marketId: string; shares: number }): Promise<unknown> | unknown;
   placeOrder(input: {

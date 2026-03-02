@@ -107,8 +107,8 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
           </div>
 
           <div className="top-actions pm-actions">
-            <Link className="btn soft" href="/dashboard">
-              Log In
+            <Link className="btn soft" href="/login">
+              Owner Login
             </Link>
             <Link className="btn primary" href="/signup">
               Sign Up
@@ -251,7 +251,7 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
             <section className="card-surface leaderboard-sticky">
               <div className="section-head compact">
                 <h3>Leaderboard</h3>
-                <Link href="/dashboard">Open</Link>
+                <Link href="/owner">Open</Link>
               </div>
               {leaderboard.slice(0, 12).map((row) => (
                 <div className="rank-row" key={row.agentId}>

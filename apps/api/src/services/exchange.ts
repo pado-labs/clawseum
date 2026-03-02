@@ -110,12 +110,13 @@ export class ExchangeService {
     const verificationCode = randomUUID().slice(0, 8).toUpperCase();
     const apiKey = `clawseum_${randomUUID().replaceAll("-", "")}`;
     const claimUrl = `/claim?agentId=${id}`;
+    const ownerEmail = normalizeEmail(input.ownerEmail);
 
     const profile: AgentProfile = {
       agentId: id,
       displayName: input.displayName,
       bio: input.bio ?? "",
-      ownerEmail: input.ownerEmail,
+      ownerEmail,
       apiKeyHash: hashApiKey(apiKey),
       verificationCode,
       claimUrl,
@@ -142,6 +143,53 @@ export class ExchangeService {
     }
     profile.claimed = true;
     return { claimed: true };
+  }
+
+  claimByOwner(input: { agentId: string; verificationCode: string; ownerEmail: string }): { claimed: boolean } {
+    const profile = this.mustProfile(input.agentId);
+    if (normalizeEmail(profile.ownerEmail) !== normalizeEmail(input.ownerEmail)) {
+      throw new Error("Owner email does not match this agent");
+    }
+    if (profile.verificationCode !== input.verificationCode.toUpperCase()) {
+      throw new Error("Invalid verification code");
+    }
+    profile.claimed = true;
+    return { claimed: true };
+  }
+
+  ownerAgents(ownerEmail: string) {
+    const normalized = normalizeEmail(ownerEmail);
+    return Array.from(this.agents.values())
+      .filter((profile) => normalizeEmail(profile.ownerEmail) === normalized)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((profile) => {
+        const account = this.market.account(profile.agentId);
+        return {
+          agentId: profile.agentId,
+          displayName: profile.displayName,
+          ownerEmail: profile.ownerEmail,
+          claimed: profile.claimed,
+          claimUrl: profile.claimUrl,
+          createdAt: profile.createdAt,
+          estimatedEquity: round2(account.availablePoints + account.lockedPoints),
+        };
+      });
+  }
+
+  rotateAgentApiKey(input: { ownerEmail: string; agentId: string }) {
+    const profile = this.mustProfile(input.agentId);
+    if (normalizeEmail(profile.ownerEmail) !== normalizeEmail(input.ownerEmail)) {
+      throw new Error("Owner email does not match this agent");
+    }
+
+    const apiKey = `clawseum_${randomUUID().replaceAll("-", "")}`;
+    profile.apiKeyHash = hashApiKey(apiKey);
+
+    return {
+      agentId: profile.agentId,
+      apiKey,
+      apiKeyPreview: `${apiKey.slice(0, 14)}...`,
+    };
   }
 
   createMarket(input: { id: string; question: string; closeAt?: number | null }) {
@@ -857,6 +905,10 @@ function hashApiKey(apiKey: string): string {
 function apiKeyMatches(storedHash: string, providedApiKey: string): boolean {
   const expectedHash = hashApiKey(providedApiKey);
   return safeEq(storedHash, expectedHash);
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
 }
 
 function safeEq(a: string, b: string): boolean {

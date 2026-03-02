@@ -179,12 +179,13 @@ export class SupabaseExchangeService implements ExchangeContract {
     const id = `agt_${randomUUID().replaceAll("-", "").slice(0, 10)}`;
     const verificationCode = randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase();
     const apiKey = `clawseum_${randomUUID().replaceAll("-", "")}`;
+    const ownerEmail = normalizeEmail(input.ownerEmail);
 
     const payload = {
       agent_id: id,
       display_name: input.displayName,
       bio: input.bio ?? "",
-      owner_email: input.ownerEmail,
+      owner_email: ownerEmail,
       api_key: hashApiKey(apiKey),
       verification_code: verificationCode,
       claim_url: `/claim?agentId=${id}`,
@@ -237,6 +238,103 @@ export class SupabaseExchangeService implements ExchangeContract {
     }
 
     return { claimed: true };
+  }
+
+  async claimByOwner(input: { agentId: string; verificationCode: string; ownerEmail: string }): Promise<{ claimed: boolean }> {
+    await this.ready();
+
+    const normalizedOwnerEmail = normalizeEmail(input.ownerEmail);
+    const { data, error } = await this.client
+      .from("agents")
+      .select("agent_id, verification_code, owner_email")
+      .eq("agent_id", input.agentId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to claim: ${error.message}`);
+    }
+    if (!data) {
+      throw new Error(`Unknown agent: ${input.agentId}`);
+    }
+    if (normalizeEmail(String(data.owner_email)) !== normalizedOwnerEmail) {
+      throw new Error("Owner email does not match this agent");
+    }
+    if (String(data.verification_code) !== input.verificationCode.toUpperCase()) {
+      throw new Error("Invalid verification code");
+    }
+
+    const { error: updateError } = await this.client
+      .from("agents")
+      .update({ claimed: true })
+      .eq("agent_id", input.agentId);
+
+    if (updateError) {
+      throw new Error(`Failed to update claim status: ${updateError.message}`);
+    }
+
+    return { claimed: true };
+  }
+
+  async ownerAgents(ownerEmail: string): Promise<unknown> {
+    await this.ready();
+
+    const normalizedOwnerEmail = normalizeEmail(ownerEmail);
+    const { data, error } = await this.client
+      .from("agents")
+      .select("agent_id, display_name, owner_email, claimed, claim_url, created_at, estimated_equity")
+      .ilike("owner_email", normalizedOwnerEmail)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw new Error(`Failed to load owner agents: ${error.message}`);
+    }
+
+    return (data ?? []).map((row) => ({
+      agentId: String(row.agent_id),
+      displayName: String(row.display_name),
+      ownerEmail: String(row.owner_email),
+      claimed: Boolean(row.claimed),
+      claimUrl: String(row.claim_url),
+      createdAt: String(row.created_at),
+      estimatedEquity: round4(num(row.estimated_equity)),
+    }));
+  }
+
+  async rotateAgentApiKey(input: { ownerEmail: string; agentId: string }): Promise<unknown> {
+    await this.ready();
+
+    const normalizedOwnerEmail = normalizeEmail(input.ownerEmail);
+    const { data, error } = await this.client
+      .from("agents")
+      .select("agent_id, owner_email")
+      .eq("agent_id", input.agentId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to rotate API key: ${error.message}`);
+    }
+    if (!data) {
+      throw new Error(`Unknown agent: ${input.agentId}`);
+    }
+    if (normalizeEmail(String(data.owner_email)) !== normalizedOwnerEmail) {
+      throw new Error("Owner email does not match this agent");
+    }
+
+    const apiKey = `clawseum_${randomUUID().replaceAll("-", "")}`;
+    const { error: updateError } = await this.client
+      .from("agents")
+      .update({ api_key: hashApiKey(apiKey) })
+      .eq("agent_id", input.agentId);
+
+    if (updateError) {
+      throw new Error(`Failed to rotate API key: ${updateError.message}`);
+    }
+
+    return {
+      agentId: input.agentId,
+      apiKey,
+      apiKeyPreview: `${apiKey.slice(0, 14)}...`,
+    };
   }
 
   async createMarket(input: { id: string; question: string; closeAt?: number | null }): Promise<unknown> {
@@ -2208,6 +2306,10 @@ function apiKeyMatches(stored: string, provided: string): boolean {
     return safeEq(stored, hashed);
   }
   return safeEq(stored, provided);
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
 }
 
 function safeEq(a: string, b: string): boolean {
