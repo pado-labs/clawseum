@@ -260,6 +260,20 @@ main {
   background: #fff1f3;
 }
 
+.pm-mini-bet a.mini-yes,
+.pm-option-actions a.mini-yes {
+  border-color: #9cd5b6;
+  color: #0d6a41;
+  background: #e9faef;
+}
+
+.pm-mini-bet a.mini-no,
+.pm-option-actions a.mini-no {
+  border-color: #edb2bd;
+  color: #a11e33;
+  background: #ffeff2;
+}
+
 .pm-chart {
   width: 100%;
   height: 100%;
@@ -692,15 +706,15 @@ main {
 }
 
 .vote-btn.yes {
-  border-color: #f0b4bc;
-  background: var(--accent-soft);
-  color: #b1162f;
+  border-color: #9edab9;
+  background: #e9faef;
+  color: #0f6c43;
 }
 
 .vote-btn.no {
-  border-color: #e6b6ba;
-  background: var(--red-soft);
-  color: var(--red-ink);
+  border-color: #e8b4be;
+  background: #ffedf1;
+  color: #a51c34;
 }
 
 .side-stack {
