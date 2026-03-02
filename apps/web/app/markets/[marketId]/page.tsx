@@ -1,5 +1,6 @@
 import Link from "next/link";
 import CommentThread from "../../../components/comment-thread";
+import PriceChartCanvas from "../../../components/price-chart-canvas";
 
 interface MarketDetail {
   marketId: string;
@@ -93,16 +94,30 @@ function price(v: number | null): string {
   return `${Math.round(v * 100)}c`;
 }
 
-function chartPoints(values: number[]): string {
-  const width = 100;
-  const height = 100;
-  return values
-    .map((value, index) => {
-      const x = (index / Math.max(1, values.length - 1)) * width;
-      const y = height - value * height;
-      return `${x},${y}`;
-    })
-    .join(" ");
+function midPrice(bid: number | null, ask: number | null, fallback: number): number {
+  if (bid === null && ask === null) return fallback;
+  if (bid === null) return ask ?? fallback;
+  if (ask === null) return bid;
+  return (bid + ask) / 2;
+}
+
+function normalizeSeries(values: number[], fallback: number): number[] {
+  if (values.length === 0) return [clamp01(fallback), clamp01(fallback)];
+  if (values.length === 1) {
+    const value = normalizePoint(values[0] ?? fallback);
+    return [value, value];
+  }
+  return values.map((value) => normalizePoint(value));
+}
+
+function normalizePoint(v: number): number {
+  if (!Number.isFinite(v)) return 0.5;
+  if (v > 1) return clamp01(v / 100);
+  return clamp01(v);
+}
+
+function clamp01(v: number): number {
+  return Math.max(0.01, Math.min(0.99, v));
 }
 
 export default async function MarketDetailPage({
@@ -124,8 +139,15 @@ export default async function MarketDetailPage({
     );
   }
 
-  const yesLine = chartPoints(detail.priceSeries.map((p) => p.yes));
-  const noLine = chartPoints(detail.priceSeries.map((p) => p.no));
+  const fallbackYes = midPrice(detail.yes.bestBid, detail.yes.bestAsk, 0.5);
+  const yesLine = normalizeSeries(
+    detail.priceSeries.map((p) => p.yes),
+    fallbackYes
+  );
+  const noLine = normalizeSeries(
+    detail.priceSeries.map((p) => p.no),
+    1 - fallbackYes
+  );
 
   const commentAgents = detail.topHolders.map((h) => ({
     agentId: h.agentId,
@@ -156,10 +178,13 @@ export default async function MarketDetailPage({
               <h3>Market Trend</h3>
               <span className="muted">48h synthetic tape</span>
             </div>
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="trend-chart">
-              <polyline points={yesLine} className="trend-line yes" />
-              <polyline points={noLine} className="trend-line no" />
-            </svg>
+            <PriceChartCanvas
+              className="trend-chart-canvas"
+              lines={[
+                { values: yesLine, color: "#cc2037", width: 2 },
+                { values: noLine, color: "#8f2f3e", width: 1.8 },
+              ]}
+            />
           </article>
 
           <article className="card-surface vote-items">

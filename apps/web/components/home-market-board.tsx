@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import PriceChartCanvas from "./price-chart-canvas";
 
 export interface OverviewMarket {
   marketId: string;
@@ -13,6 +14,16 @@ export interface OverviewMarket {
   yes: { bestBid: number | null; bestAsk: number | null };
   no: { bestBid: number | null; bestAsk: number | null };
   tradeCount: number;
+  lastTradePrice?: number | null;
+  marketType?: "binary" | "multi";
+  multiOptions?: Array<{
+    marketId: string;
+    label: string;
+    chance: number;
+    yesPrice: number;
+    noPrice: number;
+  }>;
+  priceSeriesPreview?: number[];
 }
 
 export interface LeaderboardRow {
@@ -55,7 +66,7 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
 
   const source = filteredMarkets.length > 0 ? filteredMarkets : markets;
 
-  const decorated = useMemo(() => source.map((m, idx) => decorateMarket(m, idx)), [source]);
+  const decorated = useMemo(() => source.map((m) => toDisplayMarket(m)), [source]);
 
   const featured = decorated[0] ?? null;
   const cards = decorated.slice(0, 60);
@@ -214,10 +225,10 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                       <span>{option.label}</span>
                       <strong>{option.chance}%</strong>
                       <div className="pm-mini-bet">
-                        <Link href={`/markets/${featured.market.marketId}`} className="mini-yes">
+                        <Link href={`/markets/${option.marketId}`} className="mini-yes">
                           Yes
                         </Link>
-                        <Link href={`/markets/${featured.market.marketId}`} className="mini-no">
+                        <Link href={`/markets/${option.marketId}`} className="mini-no">
                           No
                         </Link>
                       </div>
@@ -226,9 +237,15 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                 </div>
               )}
 
-              <svg viewBox="0 0 100 40" className="pm-chart" aria-label="Price trend">
-                <polyline points={sparkline(featured.seed)} className="pm-chart-line" />
-              </svg>
+              <PriceChartCanvas
+                className="pm-chart-canvas"
+                lines={[
+                  { values: featured.trend, color: "#c71735", width: 2.2 },
+                  ...(featured.kind === "binary"
+                    ? [{ values: featured.trend.map((v) => clamp01(1 - v)), color: "#9c6a72", width: 1.6 }]
+                    : []),
+                ]}
+              />
             </div>
 
             <div className="pm-feature-foot">
@@ -326,10 +343,10 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                     <span>{option.label}</span>
                     <strong>{option.chance}%</strong>
                     <div className="pm-option-actions">
-                      <Link href={`/markets/${item.market.marketId}`} className="mini-yes">
+                      <Link href={`/markets/${option.marketId}`} className="mini-yes">
                         Yes
                       </Link>
-                      <Link href={`/markets/${item.market.marketId}`} className="mini-no">
+                      <Link href={`/markets/${option.marketId}`} className="mini-no">
                         No
                       </Link>
                     </div>
@@ -357,6 +374,7 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
 }
 
 interface DisplayOption {
+  marketId: string;
   label: string;
   chance: number;
   yesPrice: number;
@@ -370,105 +388,54 @@ interface DisplayMarket {
   momentum: number;
   options: DisplayOption[];
   status: "LIVE" | "NEW";
-  seed: number;
+  trend: number[];
 }
 
-function decorateMarket(market: OverviewMarket, index: number): DisplayMarket {
-  const seed = hashString(`${market.marketId}:${market.question}:${index}`);
-  const forceMulti = /who|which|winner|champion|nominee|next|how many|what price|best|leader/i.test(market.question);
-  const startsWithWill = /^will\b/i.test(market.question);
-  const kind: "binary" | "multi" = startsWithWill && !forceMulti ? "binary" : seed % 3 === 0 || forceMulti ? "multi" : "binary";
+function toDisplayMarket(market: OverviewMarket): DisplayMarket {
+  const yesMid = currentYesChance(market);
+  const trend = normalizeSeries(market.priceSeriesPreview, yesMid / 100);
+  const start = trend[0] ?? yesMid / 100;
+  const end = trend[trend.length - 1] ?? start;
+  const momentum = round1((end - start) * 100);
+  const status: "LIVE" | "NEW" = market.tradeCount > 0 ? "LIVE" : "NEW";
 
-  const yesMid = clampPct(Math.round(midPrice(market.yes.bestBid, market.yes.bestAsk) * 100));
-  const momentum = round1((seeded(seed, 3) * 8 - 4) * 0.9);
-  const status: "LIVE" | "NEW" = seeded(seed, 7) > 0.28 ? "LIVE" : "NEW";
+  const options = (market.multiOptions ?? [])
+    .slice(0, 4)
+    .map((option) => {
+      const chance = clampPct(Math.round(option.chance));
+      return {
+        marketId: option.marketId,
+        label: option.label,
+        chance,
+        yesPrice: clampPct(Math.round(option.yesPrice)),
+        noPrice: clampPct(Math.round(option.noPrice)),
+      };
+    })
+    .sort((a, b) => b.chance - a.chance);
 
-  if (kind === "binary") {
+  const kind: "binary" | "multi" = market.marketType === "multi" && options.length >= 2 ? "multi" : "binary";
+
+  if (kind === "multi") {
     return {
       market,
       kind,
-      headlineChance: yesMid,
+      headlineChance: options[0]?.chance ?? yesMid,
       momentum,
+      options,
       status,
-      seed,
-      options: [{ label: "Yes", chance: yesMid, yesPrice: yesMid, noPrice: 100 - yesMid }],
+      trend,
     };
   }
 
-  const labels = optionLabels(market.question, market.category, seed);
-  const raw: [number, number, number] = [seeded(seed, 11) + 0.12, seeded(seed, 12) + 0.12, seeded(seed, 13) + 0.12];
-  const total = raw.reduce((acc, v) => acc + v, 0);
-  const first = clampPct(Math.round((raw[0] / total) * 100));
-  const second = clampPct(Math.round((raw[1] / total) * 100));
-  const third = clampPct(100 - first - second);
-  const chances: [number, number, number] = [first, second, third].sort((a, b) => b - a) as [number, number, number];
-  const options = labels.map((label, idx) => {
-    const chance = clampPct(chances[idx] ?? 0);
-    return { label, chance, yesPrice: chance, noPrice: 100 - chance };
-  });
-
   return {
     market,
-    kind,
-    headlineChance: options[0]?.chance ?? yesMid,
+    kind: "binary",
+    headlineChance: yesMid,
     momentum,
+    options: [{ marketId: market.marketId, label: "Yes", chance: yesMid, yesPrice: yesMid, noPrice: 100 - yesMid }],
     status,
-    seed,
-    options,
+    trend,
   };
-}
-
-function optionLabels(question: string, category: string, seed: number): [string, string, string] {
-  if (/price|bitcoin|ethereum|fdv|market cap|stock/i.test(question)) {
-    return ["Above target", "Range bound", "Below target"];
-  }
-  if (/winner|champion|league|cup|mvp|final/i.test(question) || /sports/i.test(category)) {
-    const sample = pickFromSeed(["Favorites", "Challengers", "Longshots"], seed);
-    return [sample[0], sample[1], sample[2]];
-  }
-  if (/president|nominee|senate|election|prime minister|leader|party/i.test(question) || /politics/i.test(category)) {
-    const sample = pickFromSeed(["Candidate A", "Candidate B", "Other"], seed);
-    return [sample[0], sample[1], sample[2]];
-  }
-  if (/ceasefire|strike|invade|regime|war|conflict/i.test(question)) {
-    return ["Early window", "Late window", "No event"];
-  }
-  return ["Option A", "Option B", "Option C"];
-}
-
-function pickFromSeed(input: [string, string, string], seed: number): [string, string, string] {
-  const mod = seed % 3;
-  if (mod === 0) return [input[0], input[1], input[2]];
-  if (mod === 1) return [input[1], input[2], input[0]];
-  return [input[2], input[0], input[1]];
-}
-
-function sparkline(seed: number): string {
-  const points: string[] = [];
-  const count = 28;
-  let current = 0.48 + seeded(seed, 0) * 0.22;
-  for (let i = 0; i < count; i += 1) {
-    const drift = (seeded(seed, i + 21) - 0.5) * 0.19;
-    current = clamp01(current + drift);
-    const x = (i / (count - 1)) * 100;
-    const y = 38 - current * 34;
-    points.push(`${x.toFixed(2)},${y.toFixed(2)}`);
-  }
-  return points.join(" ");
-}
-
-function seeded(seed: number, index: number): number {
-  const x = Math.sin((seed + index * 19.131) * 12.9898) * 43758.5453;
-  return x - Math.floor(x);
-}
-
-function hashString(value: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
 }
 
 function round1(v: number): number {
@@ -481,6 +448,32 @@ function clamp01(v: number): number {
 
 function clampPct(v: number): number {
   return Math.min(99, Math.max(1, v));
+}
+
+function currentYesChance(market: OverviewMarket): number {
+  const last = market.lastTradePrice;
+  if (typeof last === "number" && Number.isFinite(last)) {
+    return clampPct(Math.round(normalizePoint(last) * 100));
+  }
+  return clampPct(Math.round(midPrice(market.yes.bestBid, market.yes.bestAsk) * 100));
+}
+
+function normalizeSeries(values: number[] | undefined, fallback: number): number[] {
+  if (!Array.isArray(values) || values.length === 0) {
+    const p = clamp01(fallback);
+    return [p, p];
+  }
+  if (values.length === 1) {
+    const p = normalizePoint(values[0] ?? fallback);
+    return [p, p];
+  }
+  return values.map((value) => normalizePoint(value));
+}
+
+function normalizePoint(v: number): number {
+  if (!Number.isFinite(v)) return 0.5;
+  if (v > 1) return clamp01(v / 100);
+  return clamp01(v);
 }
 
 function compact(v: number): string {

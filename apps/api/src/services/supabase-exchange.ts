@@ -1245,7 +1245,79 @@ export class SupabaseExchangeService implements ExchangeContract {
       throw new Error(`Failed to load public overview: ${error.message}`);
     }
 
-    return (data ?? []).map((m) => this.toOverviewRow(m as MarketRow));
+    const base = (data ?? []).map((m) => this.toOverviewRow(m as MarketRow));
+    const marketIds = base.map((row) => row.marketId);
+
+    let seriesRows: Array<{ market_id: string; yes_price: number | string; t: number }> = [];
+    if (marketIds.length > 0) {
+      const { data: seriesData, error: seriesError } = await this.client
+        .from("price_series")
+        .select("market_id, yes_price, t")
+        .in("market_id", marketIds)
+        .order("t", { ascending: true });
+
+      if (seriesError) {
+        throw new Error(`Failed to load overview series preview: ${seriesError.message}`);
+      }
+      seriesRows = (seriesData ?? []) as Array<{ market_id: string; yes_price: number | string; t: number }>;
+    }
+
+    const seriesByMarket = new Map<string, number[]>();
+    for (const row of seriesRows) {
+      const bucket = seriesByMarket.get(row.market_id) ?? [];
+      bucket.push(clamp(num(row.yes_price), 0.01, 0.99));
+      seriesByMarket.set(row.market_id, bucket);
+    }
+
+    const withSeries = base.map((row) => ({
+      ...row,
+      priceSeriesPreview: compressSeries(seriesByMarket.get(row.marketId) ?? [], 24),
+    }));
+
+    const byCategory = new Map<string, Array<(typeof withSeries)[number]>>();
+    for (const row of withSeries) {
+      const bucket = byCategory.get(row.category) ?? [];
+      bucket.push(row);
+      byCategory.set(row.category, bucket);
+    }
+    for (const [category, list] of byCategory.entries()) {
+      list.sort((a, b) => b.tradeCount - a.tradeCount || b.externalVolume - a.externalVolume);
+      byCategory.set(category, list);
+    }
+
+    return withSeries.map((row) => {
+      const peers = (byCategory.get(row.category) ?? []).filter((peer) => peer.marketId !== row.marketId).slice(0, 12);
+      const options = peers.slice(0, 3).map((peer) => {
+        const chance = clampPct(Math.round(midpoint(peer.yes.bestBid, peer.yes.bestAsk, peer.lastTradePrice ?? 0.5) * 100));
+        return {
+          marketId: peer.marketId,
+          label: optionLabelFromQuestion(peer.question),
+          chance,
+          yesPrice: chance,
+          noPrice: 100 - chance,
+        };
+      });
+
+      if (isMultiChoiceCandidate(row.question) && options.length >= 3) {
+        return {
+          ...row,
+          marketType: "multi",
+          multiOptions: options,
+        };
+      }
+
+      return {
+        ...row,
+        marketType: "binary",
+        multiOptions: [] as Array<{
+          marketId: string;
+          label: string;
+          chance: number;
+          yesPrice: number;
+          noPrice: number;
+        }>,
+      };
+    });
   }
 
   async publicMarketDetail(marketId: string): Promise<unknown> {
@@ -2546,6 +2618,46 @@ function numOrNull(v: number | string | null): number | null {
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
+}
+
+function clampPct(v: number): number {
+  return Math.max(1, Math.min(99, v));
+}
+
+function compressSeries(values: number[], maxPoints: number): number[] {
+  if (values.length === 0) return [0.5, 0.5];
+  if (values.length === 1) {
+    const point = values[0] ?? 0.5;
+    return [point, point];
+  }
+  if (values.length <= maxPoints) return values;
+
+  const out: number[] = [];
+  const step = (values.length - 1) / (maxPoints - 1);
+  for (let i = 0; i < maxPoints; i += 1) {
+    const index = Math.round(i * step);
+    const value = values[index];
+    out.push(value ?? values[values.length - 1] ?? 0.5);
+  }
+  return out;
+}
+
+function optionLabelFromQuestion(question: string): string {
+  const cleaned = question
+    .replace(/\(Alt\s*\d+\)/gi, "")
+    .replace(/\?/g, "")
+    .replace(/^will\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (cleaned.length <= 34) return cleaned;
+  return `${cleaned.slice(0, 31)}...`;
+}
+
+function isMultiChoiceCandidate(question: string): boolean {
+  return /(winner|nominee|next|which|best|largest|top 4|champion|party|model|leader|prime minister|supreme leader)/i.test(
+    question
+  );
 }
 
 function round2(v: number): number {

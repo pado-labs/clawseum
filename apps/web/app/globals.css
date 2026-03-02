@@ -274,13 +274,15 @@ main {
   background: #ffeff2;
 }
 
-.pm-chart {
+.pm-chart,
+.pm-chart-canvas {
   width: 100%;
   height: 100%;
   min-height: 160px;
   border-radius: 12px;
   background: linear-gradient(180deg, #fff6f7, #ffedf0);
   border: 1px solid #efccd2;
+  display: block;
 }
 
 .pm-chart-line {
@@ -784,12 +786,14 @@ main {
   gap: 10px;
 }
 
-.trend-chart {
+.trend-chart,
+.trend-chart-canvas {
   width: 100%;
   height: 260px;
   border-radius: 10px;
   background: linear-gradient(180deg, #fff7f8, #ffeff1);
   border: 1px solid #f1d8dc;
+  display: block;
 }
 
 .trend-line {
