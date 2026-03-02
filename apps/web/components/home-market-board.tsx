@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { type CSSProperties, useMemo, useState } from "react";
 
 export interface OverviewMarket {
   marketId: string;
@@ -193,92 +193,106 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
           </section>
 
           <section className="pm-market-grid">
-            {cards.map((item) => (
-              <article
-                key={item.market.marketId}
-                className={`card-surface pm-market-card ${
-                  item.kind === "binary"
-                    ? "pm-market-card-binary"
-                    : item.kind === "threeWay"
-                      ? "pm-market-card-threeway"
-                      : "pm-market-card-multi"
-                }`}
-              >
-                <div className="market-card-top">
-                  <span className="mini-badge">{item.market.category}</span>
-                  <span className="mini-muted">
-                    {item.kind === "binary" ? "Yes / No" : item.kind === "threeWay" ? "3-way (draw)" : "Multi choice"}
-                  </span>
-                </div>
+            {cards.map((item) => {
+              const chanceTone = item.headlineChance >= 50 ? "up" : "down";
+              const marketHref = `/markets/${item.market.marketId}`;
 
-                <Link href={`/markets/${item.market.marketId}`} className="market-title-link">
-                  {item.market.question}
-                </Link>
+              return (
+                <article
+                  key={item.market.marketId}
+                  className={`card-surface pm-market-card ${
+                    item.kind === "binary"
+                      ? "pm-market-card-binary"
+                      : item.kind === "threeWay"
+                        ? "pm-market-card-threeway"
+                        : "pm-market-card-multi"
+                  }`}
+                >
+                  <div className="market-card-top">
+                    <span className="mini-badge">{item.market.category}</span>
+                    <span className="mini-muted">
+                      {item.kind === "binary" ? "Yes / No" : item.kind === "threeWay" ? "3-way (draw)" : "Multi choice"}
+                    </span>
+                  </div>
 
-                <div className="pm-card-prob">{item.headlineChance}% chance</div>
-
-                {item.kind === "binary" ? (
-                  <div className="pm-card-body pm-card-body-binary">
-                    <div className="vote-row">
-                      <Link href={`/markets/${item.market.marketId}`} className="vote-btn yes">
-                        <span>Yes</span>
-                        <strong>{item.options[0]?.yesPrice ?? 50}%</strong>
-                      </Link>
-                      <Link href={`/markets/${item.market.marketId}`} className="vote-btn no">
-                        <span>No</span>
-                        <strong>{item.options[0]?.noPrice ?? 50}%</strong>
-                      </Link>
+                  <div className="pm-title-row">
+                    <Link href={marketHref} className="market-title-link">
+                      {item.market.question}
+                    </Link>
+                    <div
+                      className={`pm-chance-ring ${chanceTone}`}
+                      style={{ "--chance-pct": `${item.headlineChance}%` } as CSSProperties}
+                    >
+                      <div className="pm-chance-ring-inner">
+                        <strong>{item.headlineChance}%</strong>
+                        <span>chance</span>
+                      </div>
                     </div>
                   </div>
-                ) : item.kind === "threeWay" ? (
-                  <div className="pm-card-body pm-card-body-threeway">
-                    <div className="pm-threeway-row">
-                      {item.options.map((option) => (
-                        <Link
-                          href={`/markets/${option.marketId}`}
-                          key={`${item.market.marketId}-${option.label}`}
-                          className={`pm-threeway-btn ${
-                            option.label.toLowerCase() === "draw"
-                              ? "draw"
-                              : option.chance >= item.headlineChance
-                                ? "yes"
-                                : "no"
-                          }`}
-                        >
-                          <span>{option.label}</span>
-                          <strong>{option.chance}%</strong>
+
+                  {item.kind === "binary" ? (
+                    <div className="pm-card-body pm-card-body-binary">
+                      <div className="vote-row">
+                        <Link href={marketHref} className="vote-btn yes">
+                          <span>Yes</span>
+                          <strong>{item.options[0]?.yesPrice ?? 50}%</strong>
                         </Link>
-                      ))}
+                        <Link href={marketHref} className="vote-btn no">
+                          <span>No</span>
+                          <strong>{item.options[0]?.noPrice ?? 50}%</strong>
+                        </Link>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="pm-card-body pm-card-body-multi">
-                    <div className="pm-card-options">
-                      {item.options.slice(0, 3).map((option) => (
-                        <div className="pm-option-row" key={option.label}>
-                          <span className="pm-option-label">{option.label}</span>
-                          <strong className="pm-option-chance">{option.chance}%</strong>
-                          <div className="pm-option-actions">
-                            <Link href={`/markets/${option.marketId}`} className="mini-yes">
-                              Yes
-                            </Link>
-                            <Link href={`/markets/${option.marketId}`} className="mini-no">
-                              No
-                            </Link>
+                  ) : item.kind === "threeWay" ? (
+                    <div className="pm-card-body pm-card-body-threeway">
+                      <div className="pm-threeway-row">
+                        {item.options.map((option) => (
+                          <Link
+                            href={marketHref}
+                            key={`${item.market.marketId}-${option.label}`}
+                            className={`pm-threeway-btn ${
+                              option.label.toLowerCase() === "draw"
+                                ? "draw"
+                                : option.chance >= item.headlineChance
+                                  ? "yes"
+                                  : "no"
+                            }`}
+                          >
+                            <span>{option.label}</span>
+                            <strong>{option.chance}%</strong>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="pm-card-body pm-card-body-multi">
+                      <div className="pm-card-options">
+                        {item.options.slice(0, 3).map((option) => (
+                          <div className="pm-option-row" key={option.label}>
+                            <span className="pm-option-label">{option.label}</span>
+                            <strong className="pm-option-chance">{option.chance}%</strong>
+                            <div className="pm-option-actions">
+                              <Link href={`/markets/${option.marketId}`} className="mini-yes">
+                                Yes
+                              </Link>
+                              <Link href={`/markets/${option.marketId}`} className="mini-no">
+                                No
+                              </Link>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                <div className="market-foot">
-                  <span>${compact(item.market.externalVolume)} Vol.</span>
-                  <span>{item.market.tradeCount} trades</span>
-                  <span>{item.market.commentCount} comments</span>
-                </div>
-              </article>
-            ))}
+                  <div className="market-foot">
+                    <span>${compact(item.market.externalVolume)} Vol.</span>
+                    <span>{item.market.tradeCount} trades</span>
+                    <span>{item.market.commentCount} comments</span>
+                  </div>
+                </article>
+              );
+            })}
           </section>
 
           {cards.length === 0 && (

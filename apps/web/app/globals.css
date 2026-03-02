@@ -320,18 +320,54 @@ main {
 .pm-market-card {
   display: grid;
   gap: 10px;
-  grid-template-rows: auto auto auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
   padding: 12px;
   border-color: #eed1d5;
   min-height: 330px;
 }
 
-.pm-card-prob {
-  font-size: 28px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: #ba1832;
-  line-height: 1;
+.pm-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.pm-chance-ring {
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  padding: 4px;
+  background: conic-gradient(#8ecfac 0 var(--chance-pct, 50%), #dde0e7 var(--chance-pct, 50%) 100%);
+}
+
+.pm-chance-ring.up {
+  background: conic-gradient(#77c595 0 var(--chance-pct, 50%), #dde0e7 var(--chance-pct, 50%) 100%);
+}
+
+.pm-chance-ring.down {
+  background: conic-gradient(#eb6a70 0 var(--chance-pct, 50%), #dde0e7 var(--chance-pct, 50%) 100%);
+}
+
+.pm-chance-ring-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #fff;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  line-height: 1.1;
+}
+
+.pm-chance-ring-inner strong {
+  font-size: 16px;
+  color: #151515;
+}
+
+.pm-chance-ring-inner span {
+  font-size: 11px;
+  color: #6d7484;
 }
 
 .pm-card-options {
@@ -690,12 +726,13 @@ main {
 
 .market-title-link {
   font-weight: 700;
-  line-height: 1.35;
-  min-height: 74px;
+  line-height: 1.3;
+  min-height: 84px;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  font-size: 22px;
 }
 
 .market-stats,
@@ -723,11 +760,11 @@ main {
 }
 
 .pm-card-body-multi {
-  min-height: 190px;
+  min-height: 156px;
 }
 
 .pm-card-body-threeway {
-  min-height: 126px;
+  min-height: 108px;
 }
 
 .pm-threeway-row {
@@ -797,12 +834,23 @@ main {
 .vote-btn {
   border-radius: 11px;
   border: 1px solid transparent;
-  padding: 8px 10px;
+  padding: 10px 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
   font: inherit;
+  min-height: 52px;
+}
+
+.vote-btn span {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.vote-btn strong {
+  font-size: 16px;
 }
 
 .vote-btn.yes {
