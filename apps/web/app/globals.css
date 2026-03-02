@@ -96,6 +96,8 @@ main {
 
 .pm-right-rail {
   min-width: 0;
+  position: sticky;
+  top: 84px;
   align-self: start;
 }
 
@@ -872,8 +874,8 @@ main {
 }
 
 .leaderboard-sticky {
-  position: sticky;
-  top: 84px;
+  position: static;
+  top: auto;
 }
 
 .pm-leaderboard-card {
