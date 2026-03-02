@@ -5,8 +5,10 @@ import { SupabaseExchangeService } from "./services/supabase-exchange.js";
 import { createSupabaseContext, projectUrlFromRef } from "./services/supabase-client.js";
 import { registerPublicRoutes } from "./routes/public-routes.js";
 import { registerAgentRoutes } from "./routes/agent-routes.js";
+import { registerAgentProofRoutes } from "./routes/agent-proof-routes.js";
 import { registerMarketRoutes } from "./routes/market-routes.js";
 import { registerOwnerRoutes } from "./routes/owner-routes.js";
+import { AgentProofService } from "./services/agent-proof.js";
 
 const app = Fastify({ logger: true });
 
@@ -17,6 +19,7 @@ if (!process.env.SUPABASE_URL && process.env.SUPABASE_PROJECT_ID) {
 const exchange = new SupabaseExchangeService();
 await exchange.ready();
 const { client: supabaseAuthClient } = createSupabaseContext();
+const agentProof = new AgentProofService();
 
 await app.register(cors, { origin: true });
 
@@ -24,7 +27,8 @@ app.get("/health", async () => ({ ok: true, service: "clawseum-api" }));
 
 await registerPublicRoutes(app, exchange);
 await registerAgentRoutes(app, exchange);
-await registerMarketRoutes(app, exchange);
+await registerAgentProofRoutes(app, exchange, agentProof);
+await registerMarketRoutes(app, exchange, agentProof);
 await registerOwnerRoutes(app, exchange, supabaseAuthClient);
 
 app.setErrorHandler((error, _request, reply) => {

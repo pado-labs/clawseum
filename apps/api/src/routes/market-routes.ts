@@ -1,9 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import type { Outcome } from "@clawseum/shared-types";
 import type { ExchangeContract } from "../services/exchange-contract.js";
+import type { AgentProofService } from "../services/agent-proof.js";
 import { requireAgentAccess } from "./agent-auth.js";
 
-export async function registerMarketRoutes(app: FastifyInstance, exchange: ExchangeContract): Promise<void> {
+export async function registerMarketRoutes(
+  app: FastifyInstance,
+  exchange: ExchangeContract,
+  proof: AgentProofService
+): Promise<void> {
   app.post("/api/v1/markets", async (request) => {
     const body = request.body as { id: string; question: string; closeAt?: number | null };
     return exchange.createMarket(body);
@@ -12,7 +17,10 @@ export async function registerMarketRoutes(app: FastifyInstance, exchange: Excha
   app.post("/api/v1/markets/:marketId/mint", async (request) => {
     const params = request.params as { marketId: string };
     const body = request.body as { agentId: string; shares: number };
-    await requireAgentAccess(request, exchange, body.agentId);
+    await requireAgentAccess(request, exchange, body.agentId, {
+      proofService: proof,
+      requireProof: true,
+    });
     return exchange.mintCompleteSet({ ...body, marketId: params.marketId });
   });
 
@@ -25,14 +33,20 @@ export async function registerMarketRoutes(app: FastifyInstance, exchange: Excha
       price: number;
       shares: number;
     };
-    await requireAgentAccess(request, exchange, body.agentId);
+    await requireAgentAccess(request, exchange, body.agentId, {
+      proofService: proof,
+      requireProof: true,
+    });
     return exchange.placeOrder({ ...body, marketId: params.marketId });
   });
 
   app.post("/api/v1/markets/:marketId/orders/:orderId/cancel", async (request) => {
     const params = request.params as { marketId: string; orderId: string };
     const body = request.body as { agentId: string };
-    await requireAgentAccess(request, exchange, body.agentId);
+    await requireAgentAccess(request, exchange, body.agentId, {
+      proofService: proof,
+      requireProof: true,
+    });
     return exchange.cancelOrder({ ...params, agentId: body.agentId });
   });
 
@@ -56,7 +70,10 @@ export async function registerMarketRoutes(app: FastifyInstance, exchange: Excha
   app.post("/api/v1/markets/:marketId/redeem", async (request) => {
     const params = request.params as { marketId: string };
     const body = request.body as { agentId: string };
-    await requireAgentAccess(request, exchange, body.agentId);
+    await requireAgentAccess(request, exchange, body.agentId, {
+      proofService: proof,
+      requireProof: true,
+    });
     return exchange.redeem({ marketId: params.marketId, agentId: body.agentId });
   });
 
@@ -78,7 +95,10 @@ export async function registerMarketRoutes(app: FastifyInstance, exchange: Excha
     async (request) => {
       const params = request.params as { marketId: string };
       const body = request.body as { agentId: string; body: string; parentId?: string | null };
-      await requireAgentAccess(request, exchange, body.agentId);
+      await requireAgentAccess(request, exchange, body.agentId, {
+        proofService: proof,
+        requireProof: true,
+      });
       return exchange.postComment({ marketId: params.marketId, ...body });
     }
   );
