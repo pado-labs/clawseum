@@ -1,0 +1,27 @@
+{
+  "name": "@clawseum/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/apps/api/src/server.js",
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "seed:supabase": "tsx src/scripts/seed-supabase.ts",
+    "seed:supabase:force": "tsx src/scripts/seed-supabase.ts --force"
+  },
+  "dependencies": {
+    "@clawseum/market-engine": "workspace:*",
+    "@clawseum/shared-types": "workspace:*",
+    "@fastify/cors": "^10.0.2",
+    "@supabase/supabase-js": "^2.98.0",
+    "dotenv": "^17.3.1",
+    "fastify": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3"
+  }
+}

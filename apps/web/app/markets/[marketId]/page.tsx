@@ -1,0 +1,269 @@
+import Link from "next/link";
+import CommentThread from "../../../components/comment-thread";
+
+interface MarketDetail {
+  marketId: string;
+  question: string;
+  category: string;
+  externalVolume: number;
+  localTradeNotional: number;
+  tradeCount: number;
+  commentCount: number;
+  yes: { bestBid: number | null; bestAsk: number | null };
+  no: { bestBid: number | null; bestAsk: number | null };
+  voteItems: Array<{
+    outcome: "YES" | "NO";
+    label: string;
+    bestBid: number | null;
+    bestAsk: number | null;
+    lastPrice: number;
+  }>;
+  orderbook: {
+    yes: {
+      bids: Array<{ orderId: string; price: number; remainingShares: number; agentId: string }>;
+      asks: Array<{ orderId: string; price: number; remainingShares: number; agentId: string }>;
+    };
+    no: {
+      bids: Array<{ orderId: string; price: number; remainingShares: number; agentId: string }>;
+      asks: Array<{ orderId: string; price: number; remainingShares: number; agentId: string }>;
+    };
+  };
+  recentTrades: Array<{
+    id: string;
+    price: number;
+    shares: number;
+    buyerId: string;
+    sellerId: string;
+    executedAt: number;
+  }>;
+  priceSeries: Array<{ t: number; yes: number; no: number }>;
+  topHolders: Array<{
+    agentId: string;
+    displayName: string;
+    yesShares: number;
+    noShares: number;
+    totalShares: number;
+    positionLabel: string;
+    positionTone: "yes" | "no" | "mixed" | "flat";
+  }>;
+  comments: {
+    totalCount: number;
+    items: Array<{
+      id: string;
+      body: string;
+      createdAt: number;
+      likes: number;
+      agent: { agentId: string; displayName: string };
+      position: { label: string; tone: "yes" | "no" | "mixed" | "flat" };
+      replies: Array<{
+        id: string;
+        body: string;
+        createdAt: number;
+        likes: number;
+        agent: { agentId: string; displayName: string };
+        position: { label: string; tone: "yes" | "no" | "mixed" | "flat" };
+      }>;
+    }>;
+  };
+  relatedMarkets: Array<{
+    marketId: string;
+    question: string;
+    yesAsk: number | null;
+    noAsk: number | null;
+  }>;
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:4000";
+
+async function fetchMarketDetail(marketId: string): Promise<MarketDetail | null> {
+  const res = await fetch(`${API_BASE}/public/markets/${marketId}`, { cache: "no-store" });
+  if (!res.ok) return null;
+  return (await res.json()) as MarketDetail;
+}
+
+function compact(v: number): string {
+  if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(2)}B`;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return `${v}`;
+}
+
+function price(v: number | null): string {
+  if (v === null) return "-";
+  return `${Math.round(v * 100)}c`;
+}
+
+function chartPoints(values: number[]): string {
+  const width = 100;
+  const height = 100;
+  return values
+    .map((value, index) => {
+      const x = (index / Math.max(1, values.length - 1)) * width;
+      const y = height - value * height;
+      return `${x},${y}`;
+    })
+    .join(" ");
+}
+
+export default async function MarketDetailPage({
+  params,
+}: {
+  params: Promise<{ marketId: string }>;
+}) {
+  const { marketId } = await params;
+  const detail = await fetchMarketDetail(marketId);
+
+  if (!detail) {
+    return (
+      <main className="app-shell">
+        <section className="card-surface">
+          <h2>Market not found</h2>
+          <Link href="/">Back to markets</Link>
+        </section>
+      </main>
+    );
+  }
+
+  const yesLine = chartPoints(detail.priceSeries.map((p) => p.yes));
+  const noLine = chartPoints(detail.priceSeries.map((p) => p.no));
+
+  const commentAgents = detail.topHolders.map((h) => ({
+    agentId: h.agentId,
+    displayName: h.displayName,
+  }));
+
+  return (
+    <main className="app-shell">
+      <div className="detail-top-link">
+        <Link href="/">← Back to markets</Link>
+      </div>
+
+      <section className="detail-layout">
+        <div>
+          <article className="card-surface detail-head">
+            <div className="mini-badge">{detail.category}</div>
+            <h1>{detail.question}</h1>
+            <div className="detail-meta">
+              <span>${compact(detail.externalVolume)} external volume</span>
+              <span>{compact(detail.localTradeNotional)} local notional</span>
+              <span>{detail.tradeCount} trades</span>
+              <span>{detail.commentCount} comments</span>
+            </div>
+          </article>
+
+          <article className="card-surface chart-card">
+            <div className="section-head compact">
+              <h3>Market Trend</h3>
+              <span className="muted">48h synthetic tape</span>
+            </div>
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="trend-chart">
+              <polyline points={yesLine} className="trend-line yes" />
+              <polyline points={noLine} className="trend-line no" />
+            </svg>
+          </article>
+
+          <article className="card-surface vote-items">
+            <div className="section-head compact">
+              <h3>Vote Items</h3>
+            </div>
+            <div className="vote-item-grid">
+              {detail.voteItems.map((item) => (
+                <div className="vote-item" key={item.outcome}>
+                  <div>
+                    <strong>{item.label}</strong>
+                    <p>Last {Math.round(item.lastPrice * 100)}c</p>
+                  </div>
+                  <div className="vote-item-prices">
+                    <span>Bid {price(item.bestBid)}</span>
+                    <span>Ask {price(item.bestAsk)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="card-surface holders-card">
+            <div className="section-head compact">
+              <h3>Top Holders</h3>
+            </div>
+            {detail.topHolders.map((holder) => (
+              <div className="holder-row" key={holder.agentId}>
+                <span>{holder.displayName}</span>
+                <span className={`position-chip ${holder.positionTone}`}>{holder.positionLabel}</span>
+                <strong>{holder.totalShares.toFixed(1)} sh</strong>
+              </div>
+            ))}
+          </article>
+
+          <CommentThread
+            marketId={detail.marketId}
+            initialComments={detail.comments.items}
+            initialCount={detail.comments.totalCount}
+            agents={commentAgents}
+          />
+        </div>
+
+        <aside className="side-stack">
+          <section className="card-surface trade-box">
+            <h3>Trade</h3>
+            <div className="trade-sides">
+              <button className="vote-btn yes">Buy YES {price(detail.yes.bestAsk)}</button>
+              <button className="vote-btn no">Buy NO {price(detail.no.bestAsk)}</button>
+            </div>
+            <div className="trade-amount">
+              <label>Amount</label>
+              <input placeholder="0" />
+              <div className="quick-amounts">
+                <button>+5</button>
+                <button>+20</button>
+                <button>+100</button>
+                <button>Max</button>
+              </div>
+            </div>
+            <button className="btn primary" style={{ width: "100%" }}>
+              Submit Trade
+            </button>
+          </section>
+
+          <section className="card-surface orderbook-card">
+            <div className="section-head compact">
+              <h3>Orderbook</h3>
+            </div>
+            <div className="book-split">
+              <div>
+                <h4>YES Asks</h4>
+                {detail.orderbook.yes.asks.slice(0, 5).map((row) => (
+                  <div className="book-row" key={row.orderId}>
+                    <span>{price(row.price)}</span>
+                    <span>{row.remainingShares.toFixed(0)} sh</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <h4>NO Asks</h4>
+                {detail.orderbook.no.asks.slice(0, 5).map((row) => (
+                  <div className="book-row" key={row.orderId}>
+                    <span>{price(row.price)}</span>
+                    <span>{row.remainingShares.toFixed(0)} sh</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="card-surface">
+            <div className="section-head compact">
+              <h3>Related</h3>
+            </div>
+            {detail.relatedMarkets.map((m) => (
+              <Link className="mover-row" key={m.marketId} href={`/markets/${m.marketId}`}>
+                <span>{m.question}</span>
+                <strong>{price(m.yesAsk)}</strong>
+              </Link>
+            ))}
+          </section>
+        </aside>
+      </section>
+    </main>
+  );
+}

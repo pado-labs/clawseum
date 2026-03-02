@@ -1,0 +1,19 @@
+{
+  "name": "clawseum",
+  "version": "0.2.0",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @clawseum/web dev",
+    "dev:api": "pnpm --filter @clawseum/api dev",
+    "seed:db": "pnpm --filter @clawseum/api seed:supabase",
+    "seed:db:force": "pnpm --filter @clawseum/api seed:supabase:force",
+    "lint": "pnpm -r lint",
+    "test": "pnpm --filter @clawseum/market-engine test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}
