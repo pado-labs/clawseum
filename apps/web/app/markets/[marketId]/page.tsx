@@ -1,6 +1,6 @@
 import Link from "next/link";
 import CommentThread from "../../../components/comment-thread";
-import PriceChartCanvas from "../../../components/price-chart-canvas";
+import MarketLivelineChart from "../../../components/market-liveline-chart";
 
 interface MarketDetail {
   marketId: string;
@@ -144,10 +144,6 @@ export default async function MarketDetailPage({
     detail.priceSeries.map((p) => p.yes),
     fallbackYes
   );
-  const noLine = normalizeSeries(
-    detail.priceSeries.map((p) => p.no),
-    1 - fallbackYes
-  );
 
   const commentAgents = detail.topHolders.map((h) => ({
     agentId: h.agentId,
@@ -176,15 +172,9 @@ export default async function MarketDetailPage({
           <article className="card-surface chart-card">
             <div className="section-head compact">
               <h3>Market Trend</h3>
-              <span className="muted">48h synthetic tape</span>
+              <span className="muted">Live probability (YES)</span>
             </div>
-            <PriceChartCanvas
-              className="trend-chart-canvas"
-              lines={[
-                { values: yesLine, color: "#cc2037", width: 2 },
-                { values: noLine, color: "#8f2f3e", width: 1.8 },
-              ]}
-            />
+            <MarketLivelineChart className="trend-chart-canvas" series={yesLine} />
           </article>
 
           <article className="card-surface vote-items">
