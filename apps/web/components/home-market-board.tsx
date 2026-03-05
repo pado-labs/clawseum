@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { type CSSProperties, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
 
 export interface OverviewMarket {
   marketId: string;
   question: string;
+  createdAt?: number | null;
   category: string;
   closeAt?: number | null;
   externalVolume: number;
@@ -38,9 +39,14 @@ interface Props {
   leaderboard: LeaderboardRow[];
 }
 
+type SortKey = "volume_desc" | "latest_desc" | "oldest_asc";
+const PAGE_SIZE = 12;
+
 export default function HomeMarketBoard({ markets, leaderboard }: Props) {
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [sortKey, setSortKey] = useState<SortKey>("volume_desc");
+  const [page, setPage] = useState(1);
   const [entryMode, setEntryMode] = useState<"human" | "agent">("agent");
 
   const categories = useMemo(() => {
@@ -64,8 +70,35 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
     });
   }, [markets, activeCategory, search]);
 
-  const source = filteredMarkets.length > 0 ? filteredMarkets : markets;
-  const cards = useMemo(() => source.map((m) => toDisplayMarket(m)).slice(0, 60), [source]);
+  const source = filteredMarkets;
+  const sortedMarkets = useMemo(() => {
+    const list = [...source];
+    switch (sortKey) {
+      case "latest_desc":
+        list.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+        break;
+      case "oldest_asc":
+        list.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+        break;
+      case "volume_desc":
+      default:
+        list.sort((a, b) => b.externalVolume - a.externalVolume);
+        break;
+    }
+    return list;
+  }, [source, sortKey]);
+
+  const pageCount = Math.max(1, Math.ceil(sortedMarkets.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pagedMarkets = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return sortedMarkets.slice(start, start + PAGE_SIZE);
+  }, [sortedMarkets, currentPage]);
+  const cards = useMemo(() => pagedMarkets.map((m) => toDisplayMarket(m)), [pagedMarkets]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, activeCategory, sortKey]);
 
   const entryContent =
     entryMode === "human"
@@ -212,6 +245,26 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
             ))}
           </section>
 
+          <section
+            className="card-surface"
+            style={{ marginTop: 10, marginBottom: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}
+          >
+            <span className="muted">Sort</span>
+            <select
+              value={sortKey}
+              onChange={(event) => setSortKey(event.target.value as SortKey)}
+              aria-label="Sort markets"
+              style={{ minWidth: 180 }}
+            >
+              <option value="volume_desc">거래량 많은순</option>
+              <option value="latest_desc">최신순</option>
+              <option value="oldest_asc">오래된순</option>
+            </select>
+            <span className="muted" style={{ marginLeft: "auto" }}>
+              {sortedMarkets.length} markets · page {currentPage}/{pageCount}
+            </span>
+          </section>
+
           <section className="pm-market-grid">
             {cards.map((item) => {
               const chanceTone = item.headlineChance >= 50 ? "up" : "down";
@@ -317,6 +370,34 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
           {cards.length === 0 && (
             <section className="card-surface" style={{ marginTop: 10 }}>
               <strong>No markets match your search/filter.</strong>
+            </section>
+          )}
+
+          {cards.length > 0 && (
+            <section
+              className="card-surface"
+              style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}
+            >
+              <button className="btn soft" type="button" onClick={() => setPage(1)} disabled={currentPage <= 1}>
+                First
+              </button>
+              <button className="btn soft" type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
+                Prev
+              </button>
+              <span className="badge">
+                {currentPage} / {pageCount}
+              </span>
+              <button
+                className="btn soft"
+                type="button"
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                disabled={currentPage >= pageCount}
+              >
+                Next
+              </button>
+              <button className="btn soft" type="button" onClick={() => setPage(pageCount)} disabled={currentPage >= pageCount}>
+                Last
+              </button>
             </section>
           )}
         </div>

@@ -25,6 +25,7 @@ type AgentRow = {
 type MarketRow = {
   market_id: string;
   question: string;
+  created_at: string;
   close_at: number | string | null;
   category: string;
   external_volume: number | string;
@@ -1369,7 +1370,7 @@ export class SupabaseExchangeService implements ExchangeContract {
     const { data, error } = await this.client
       .from("markets")
       .select(
-        "market_id, question, close_at, category, external_volume, local_trade_notional, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, trade_count, last_trade_price, resolved_outcome"
+        "market_id, question, created_at, close_at, category, external_volume, local_trade_notional, comment_count, yes_best_bid, yes_best_ask, no_best_bid, no_best_ask, trade_count, last_trade_price, resolved_outcome"
       )
       .is("resolved_outcome", null)
       .order("external_volume", { ascending: false });
@@ -2133,6 +2134,7 @@ export class SupabaseExchangeService implements ExchangeContract {
   private toOverviewRow(row: MarketRow): {
     marketId: string;
     question: string;
+    createdAt: number | null;
     closeAt: number | null;
     category: string;
     externalVolume: number;
@@ -2146,6 +2148,7 @@ export class SupabaseExchangeService implements ExchangeContract {
     return {
       marketId: row.market_id,
       question: row.question,
+      createdAt: tsOrNull(row.created_at),
       closeAt: numOrNull(row.close_at ?? null),
       category: row.category,
       externalVolume: num(row.external_volume),
@@ -2786,6 +2789,12 @@ function num(v: number | string | null): number {
 function numOrNull(v: number | string | null): number | null {
   if (v === null) return null;
   const parsed = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function tsOrNull(v: string | null): number | null {
+  if (!v) return null;
+  const parsed = Date.parse(v);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
