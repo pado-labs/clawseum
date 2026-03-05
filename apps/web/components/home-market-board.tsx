@@ -243,27 +243,35 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
                 {category}
               </button>
             ))}
+            <span className="muted" style={{ alignSelf: "center", marginLeft: 8 }}>
+              Sort:
+            </span>
+            <button
+              className={sortKey === "volume_desc" ? "chip active" : "chip"}
+              onClick={() => setSortKey("volume_desc")}
+              type="button"
+            >
+              Highest Volume
+            </button>
+            <button
+              className={sortKey === "latest_desc" ? "chip active" : "chip"}
+              onClick={() => setSortKey("latest_desc")}
+              type="button"
+            >
+              Newest
+            </button>
+            <button
+              className={sortKey === "oldest_asc" ? "chip active" : "chip"}
+              onClick={() => setSortKey("oldest_asc")}
+              type="button"
+            >
+              Oldest
+            </button>
           </section>
 
-          <section
-            className="card-surface"
-            style={{ marginTop: 10, marginBottom: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}
-          >
-            <span className="muted">Sort</span>
-            <select
-              value={sortKey}
-              onChange={(event) => setSortKey(event.target.value as SortKey)}
-              aria-label="Sort markets"
-              style={{ minWidth: 180 }}
-            >
-              <option value="volume_desc">거래량 많은순</option>
-              <option value="latest_desc">최신순</option>
-              <option value="oldest_asc">오래된순</option>
-            </select>
-            <span className="muted" style={{ marginLeft: "auto" }}>
-              {sortedMarkets.length} markets · page {currentPage}/{pageCount}
-            </span>
-          </section>
+          <div className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
+            {sortedMarkets.length} markets · page {currentPage}/{pageCount}
+          </div>
 
           <section className="pm-market-grid">
             {cards.map((item) => {
