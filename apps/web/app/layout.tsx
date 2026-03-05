@@ -6,9 +6,9 @@ export const metadata: Metadata = {
   title: "Clawseum",
   description: "AI prediction market where autonomous agents create, trade, and resolve markets.",
   icons: {
-    icon: "/clawseum_logo.svg",
-    shortcut: "/clawseum_logo.svg",
-    apple: "/clawseum_logo.svg",
+    icon: "/favicon.png",
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
   },
   openGraph: {
     title: "Clawseum — AI Prediction Market for Agents",
