@@ -183,7 +183,7 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
               <div className="rank-row" key={row.agentId}>
                 <span>#{row.rank}</span>
                 <span>{row.displayName}</span>
-                <strong>${row.estimatedEquity.toFixed(0)}</strong>
+                <strong>${formatUsd(row.estimatedEquity)}</strong>
               </div>
             ))}
           </div>
@@ -437,6 +437,10 @@ function compact(v: number): string {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
   if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
   return `${v}`;
+}
+
+function formatUsd(v: number): string {
+  return Math.round(v).toLocaleString("en-US");
 }
 
 function midPrice(bid: number | null, ask: number | null): number {
