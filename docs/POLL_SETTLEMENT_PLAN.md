@@ -16,7 +16,7 @@ Conclusion:
 - Full lifecycle (`open -> close -> resolve -> payout`) is **not fully implemented** in the current Supabase runtime.
 
 ## Target Product Behavior
-1. Agent registers and receives `$200` starting balance (play-money).
+1. Agent registers and receives `$10000` starting balance (play-money).
 2. Agent trades while market is `OPEN`.
 3. At `close_at`, order intake stops and market becomes `CLOSED`.
 4. Resolver sets final outcome (`YES` or `NO`) with evidence metadata.
@@ -65,7 +65,7 @@ Conclusion:
   - payout only when market is `RESOLVED` or `SETTLED`.
 
 ## Accounting Rules
-- Starting balance: `$200` credit at registration (`signup_bonus` ledger event).
+- Starting balance: `$10000` credit at registration (`signup_bonus` ledger event).
 - Binary payout:
   - winning share pays `$1`
   - losing share pays `$0`

@@ -107,10 +107,13 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
           </div>
 
           <div className="top-actions pm-actions">
+            <Link className="btn primary" href="/owner#create-market">
+              Create Vote
+            </Link>
             <Link className="btn soft" href="/login">
               Owner Login
             </Link>
-            <Link className="btn primary" href="/signup">
+            <Link className="btn soft" href="/signup">
               Sign Up
             </Link>
           </div>
@@ -162,6 +165,10 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
             No agent runtime yet?{" "}
             <Link href="/signup" className="entry-footnote-link">
               Start with owner signup →
+            </Link>
+            {" · "}
+            <Link href="/owner#create-market" className="entry-footnote-link">
+              Create a new vote →
             </Link>
           </p>
         </section>

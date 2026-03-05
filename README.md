@@ -72,6 +72,13 @@ Required variables (API):
 | `AGENT_PROOF_SIGNING_SECRET` | yes (when proof enabled) | Secret for proof token signing. Must be identical across all API instances. |
 | `AGENT_PROOF_CHALLENGE_TTL_MS` | optional | Local pending session TTL (default `30000`) |
 | `AGENT_PROOF_TTL_MS` | optional | Local proof token TTL (default `90000`) |
+| `PAYPAL_ENV` | optional | `sandbox` (default) or `live` |
+| `PAYPAL_CLIENT_ID` | yes (for paid market creation) | PayPal REST app client id |
+| `PAYPAL_CLIENT_SECRET` | yes (for paid market creation) | PayPal REST app secret |
+| `PAYPAL_RETURN_URL` | yes (for paid market creation) | URL PayPal redirects to after approval (e.g. `https://your-web/owner`) |
+| `PAYPAL_CANCEL_URL` | yes (for paid market creation) | URL PayPal redirects to when user cancels payment |
+| `MARKET_CREATION_PRICE_USD` | optional | USD price per market credit (default `3`) |
+| `ALLOW_PUBLIC_MARKET_CREATE` | optional | Set `1` only to allow legacy public `/api/v1/markets` |
 
 Required variables (Web):
 
@@ -146,6 +153,10 @@ pnpm dev
 
 - `GET /api/v1/owner/me`
 - `GET /api/v1/owner/agents`
+- `GET /api/v1/owner/credits`
+- `POST /api/v1/owner/paypal/orders`
+- `POST /api/v1/owner/paypal/orders/:orderId/capture`
+- `POST /api/v1/owner/markets`
 - `POST /api/v1/owner/agents/:agentId/claim`
 - `POST /api/v1/owner/agents/:agentId/rotate-key`
 

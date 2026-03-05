@@ -193,9 +193,9 @@ export class SupabaseExchangeService implements ExchangeContract {
       verification_code: verificationCode,
       claim_url: `/claim?agentId=${id}`,
       claimed: false,
-      available_usd: 200,
+      available_usd: 10000,
       locked_usd: 0,
-      estimated_equity: 200,
+      estimated_equity: 10000,
     };
 
     const { error } = await this.client.from("agents").insert(payload);
@@ -1431,7 +1431,7 @@ export class SupabaseExchangeService implements ExchangeContract {
         };
       });
 
-      if (isMultiChoiceCandidate(row.question) && options.length >= 3) {
+      if (isMultiChoiceCandidate(row.question) && options.length >= 2) {
         return {
           ...row,
           marketType: "multi",
@@ -2375,7 +2375,9 @@ function buildSeedSnapshot(): {
     const rng = new DeterministicRng(hashCode(marketId));
     const closeAt = closeSeedBase + (7 + (index % 14)) * 24 * 60 * 60 * 1000;
 
-    const center = clamp(0.16 + rng.next() * 0.68, 0.08, 0.92);
+    const center = input.centerPrice
+      ? clamp(input.centerPrice, 0.08, 0.92)
+      : clamp(0.16 + rng.next() * 0.68, 0.08, 0.92);
     const spread = clamp(0.02 + rng.next() * 0.045, 0.02, 0.08);
     const yesBid = clamp(center - spread / 2, 0.04, 0.96);
     const yesAsk = clamp(center + spread / 2, 0.04, 0.96);

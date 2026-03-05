@@ -124,7 +124,7 @@ export class ExchangeService {
       createdAt: Date.now(),
     };
 
-    this.market.createAgent({ agentId: id, initialPoints: 200 });
+    this.market.createAgent({ agentId: id, initialPoints: 10000 });
     this.agents.set(id, profile);
 
     return {

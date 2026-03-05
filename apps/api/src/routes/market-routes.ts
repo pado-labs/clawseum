@@ -10,6 +10,9 @@ export async function registerMarketRoutes(
   proof: AgentProofService
 ): Promise<void> {
   app.post("/api/v1/markets", async (request) => {
+    if (process.env.ALLOW_PUBLIC_MARKET_CREATE !== "1") {
+      throw new Error("Public market creation is disabled. Use /api/v1/owner/markets.");
+    }
     const body = request.body as { id: string; question: string; closeAt?: number | null };
     return exchange.createMarket(body);
   });

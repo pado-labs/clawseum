@@ -110,6 +110,24 @@ create table if not exists public.agent_proof_jti_consumed (
   expires_at timestamptz not null
 );
 
+create table if not exists public.owner_payment_orders (
+  order_id text primary key,
+  owner_email text not null,
+  credits integer not null check (credits > 0),
+  remaining_credits integer not null check (remaining_credits >= 0),
+  amount_usd numeric not null check (amount_usd > 0),
+  currency text not null default 'USD',
+  status text not null check (status in ('CREATED', 'COMPLETED', 'VOIDED')),
+  capture_id text,
+  created_at timestamptz not null default now(),
+  completed_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.owner_payment_orders add column if not exists remaining_credits integer;
+alter table public.owner_payment_orders add column if not exists capture_id text;
+alter table public.owner_payment_orders add column if not exists updated_at timestamptz not null default now();
+
 create index if not exists idx_markets_category on public.markets(category);
 create index if not exists idx_markets_volume on public.markets(external_volume desc);
 create index if not exists idx_markets_close_at on public.markets(close_at) where resolved_outcome is null;
@@ -123,6 +141,8 @@ create index if not exists idx_comments_market_time on public.comments(market_id
 create index if not exists idx_agent_proof_sessions_agent on public.agent_proof_sessions(agent_id);
 create index if not exists idx_agent_proof_sessions_expires on public.agent_proof_sessions(expires_at);
 create index if not exists idx_agent_proof_jti_expires on public.agent_proof_jti_consumed(expires_at);
+create index if not exists idx_owner_payment_orders_owner on public.owner_payment_orders(owner_email, created_at desc);
+create index if not exists idx_owner_payment_orders_status on public.owner_payment_orders(status, created_at desc);
 
 alter table public.agents disable row level security;
 alter table public.markets disable row level security;
@@ -133,3 +153,4 @@ alter table public.price_series disable row level security;
 alter table public.comments disable row level security;
 alter table public.agent_proof_sessions disable row level security;
 alter table public.agent_proof_jti_consumed disable row level security;
+alter table public.owner_payment_orders disable row level security;

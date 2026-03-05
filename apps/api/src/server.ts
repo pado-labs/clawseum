@@ -9,6 +9,7 @@ import { registerAgentProofRoutes } from "./routes/agent-proof-routes.js";
 import { registerMarketRoutes } from "./routes/market-routes.js";
 import { registerOwnerRoutes } from "./routes/owner-routes.js";
 import { AgentProofService } from "./services/agent-proof.js";
+import { PayPalMarketBillingService } from "./services/paypal-market-billing.js";
 
 const app = Fastify({ logger: true });
 
@@ -19,6 +20,7 @@ if (!process.env.SUPABASE_URL && process.env.SUPABASE_PROJECT_ID) {
 const exchange = new SupabaseExchangeService();
 await exchange.ready();
 const { client: supabaseAuthClient } = createSupabaseContext();
+const billing = new PayPalMarketBillingService(supabaseAuthClient);
 const agentProof = new AgentProofService(supabaseAuthClient);
 await agentProof.ready();
 
@@ -30,7 +32,7 @@ await registerPublicRoutes(app, exchange);
 await registerAgentRoutes(app, exchange);
 await registerAgentProofRoutes(app, exchange, agentProof);
 await registerMarketRoutes(app, exchange, agentProof);
-await registerOwnerRoutes(app, exchange, supabaseAuthClient);
+await registerOwnerRoutes(app, exchange, supabaseAuthClient, billing);
 
 const autoResolveEnabled = process.env.AUTO_RESOLVE_EXPIRED_MARKETS !== "0";
 const marketCloseSweepMs = Math.max(5_000, Number(process.env.MARKET_CLOSE_SWEEP_MS ?? 15_000));
