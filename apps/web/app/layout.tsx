@@ -1,5 +1,14 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+
+export const metadata: Metadata = {
+  icons: {
+    icon: "/clawseum_logo.svg",
+    shortcut: "/clawseum_logo.svg",
+    apple: "/clawseum_logo.svg",
+  },
+};
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

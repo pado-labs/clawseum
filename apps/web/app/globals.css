@@ -37,7 +37,7 @@ a {
 main {
   max-width: 1680px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 20px 30px;
 }
 
 .app-shell {
@@ -1327,6 +1327,10 @@ select {
 }
 
 @media (max-width: 760px) {
+  main {
+    padding: 14px 16px;
+  }
+
   .pm-header-main {
     grid-template-columns: 1fr;
   }
