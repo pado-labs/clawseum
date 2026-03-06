@@ -34,6 +34,7 @@ export interface ExchangeContract {
     parentId?: string | null;
   }): Promise<unknown> | unknown;
   publicOverview(): Promise<unknown> | unknown;
+  publicLiveActivity(): Promise<unknown> | unknown;
   publicMarketDetail(marketId: string): Promise<unknown> | unknown;
   publicComments(marketId: string): Promise<unknown> | unknown;
   publicLeaderboard(): Promise<unknown> | unknown;

@@ -25,7 +25,7 @@ type AgentRow = {
 type MarketRow = {
   market_id: string;
   question: string;
-  created_at: string;
+  created_at?: string | null;
   close_at: number | string | null;
   category: string;
   external_volume: number | string;
@@ -1454,6 +1454,53 @@ export class SupabaseExchangeService implements ExchangeContract {
     });
   }
 
+  async publicLiveActivity(): Promise<unknown> {
+    await this.ready();
+
+    const { data, error } = await this.client
+      .from("comments")
+      .select("id, market_id, agent_id, created_at")
+      .order("created_at", { ascending: false })
+      .limit(30);
+
+    if (error) {
+      throw new Error(`Failed to load live activity: ${error.message}`);
+    }
+
+    const rows = (data ?? []) as Array<Pick<CommentRow, "id" | "market_id" | "agent_id" | "created_at">>;
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const agentIds = Array.from(new Set(rows.map((row) => row.agent_id)));
+    const marketIds = Array.from(new Set(rows.map((row) => row.market_id)));
+
+    const [agentsRes, marketsRes] = await Promise.all([
+      this.client.from("agents").select("agent_id, display_name").in("agent_id", agentIds),
+      this.client.from("markets").select("market_id, question").in("market_id", marketIds),
+    ]);
+
+    if (agentsRes.error) {
+      throw new Error(`Failed to load live activity agents: ${agentsRes.error.message}`);
+    }
+    if (marketsRes.error) {
+      throw new Error(`Failed to load live activity markets: ${marketsRes.error.message}`);
+    }
+
+    const agentNameById = new Map((agentsRes.data ?? []).map((row) => [row.agent_id, row.display_name]));
+    const marketLabelById = new Map((marketsRes.data ?? []).map((row) => [row.market_id, row.question]));
+
+    return rows.map((row) => ({
+      id: row.id,
+      type: "comment" as const,
+      actor: agentNameById.get(row.agent_id) ?? row.agent_id,
+      verb: "commented on",
+      targetLabel: marketLabelById.get(row.market_id) ?? row.market_id,
+      targetHref: `/markets/${row.market_id}`,
+      createdAt: row.created_at,
+    }));
+  }
+
   async publicMarketDetail(marketId: string): Promise<unknown> {
     await this.ready();
 
@@ -2792,7 +2839,7 @@ function numOrNull(v: number | string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function tsOrNull(v: string | null): number | null {
+function tsOrNull(v: string | null | undefined): number | null {
   if (!v) return null;
   const parsed = Date.parse(v);
   return Number.isFinite(parsed) ? parsed : null;

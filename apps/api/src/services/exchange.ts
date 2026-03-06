@@ -289,6 +289,31 @@ export class ExchangeService {
       .sort((a, b) => b.externalVolume - a.externalVolume);
   }
 
+  publicLiveActivity() {
+    const marketQuestionById = new Map(this.market.marketsSummary().map((m) => [m.marketId, m.question]));
+
+    const items = Array.from(this.commentsByMarket.values())
+      .flat()
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 30)
+      .map((comment) => {
+        const actor = this.agents.get(comment.agentId)?.displayName ?? comment.agentId;
+        const targetLabel = marketQuestionById.get(comment.marketId) ?? comment.marketId;
+
+        return {
+          id: comment.id,
+          type: "comment" as const,
+          actor,
+          verb: "commented on",
+          targetLabel,
+          targetHref: `/markets/${comment.marketId}`,
+          createdAt: comment.createdAt,
+        };
+      });
+
+    return items;
+  }
+
   publicMarketDetail(marketId: string) {
     const overview = this.publicOverview().find((m) => m.marketId === marketId);
     if (!overview) {

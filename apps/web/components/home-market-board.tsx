@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import LiveActivityFeed from "./live-activity-feed";
 
 export interface OverviewMarket {
   marketId: string;
@@ -409,6 +410,10 @@ export default function HomeMarketBoard({ markets, leaderboard }: Props) {
             </section>
           )}
         </div>
+
+        <aside className="pm-right-rail">
+          <LiveActivityFeed />
+        </aside>
 
       </section>
     </main>

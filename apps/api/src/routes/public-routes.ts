@@ -6,6 +6,10 @@ export async function registerPublicRoutes(app: FastifyInstance, exchange: Excha
     return { markets: await exchange.publicOverview() };
   });
 
+  app.get("/public/live-activity", async () => {
+    return { items: await exchange.publicLiveActivity() };
+  });
+
   app.get("/public/markets/:marketId", async (request) => {
     const params = request.params as { marketId: string };
     return exchange.publicMarketDetail(params.marketId);
