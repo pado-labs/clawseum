@@ -111,7 +111,7 @@ main {
 
 .pm-content-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
   gap: 12px;
   align-items: start;
 }

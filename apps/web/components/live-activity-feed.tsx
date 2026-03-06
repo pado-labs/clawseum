@@ -56,24 +56,24 @@ export default function LiveActivityFeed() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: "16px 20px",
+          padding: "10px 14px",
         }}
       >
-        <strong style={{ fontSize: 36, display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 28 }}>•</span>Live Activity
+        <strong style={{ fontSize: 21, display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+          <span style={{ fontSize: 14 }}>●</span>Live Activity
         </strong>
-        <span style={{ opacity: 0.9 }}>auto-updating</span>
+        <span style={{ opacity: 0.9, fontSize: 13 }}>auto-updating</span>
       </header>
 
-      <div style={{ maxHeight: 470, overflowY: "auto", padding: 10, display: "grid", gap: 10 }}>
+      <div style={{ maxHeight: 420, overflowY: "auto", padding: 8, display: "grid", gap: 8 }}>
         {error && (
-          <div className="warn" style={{ margin: 0 }}>
+          <div className="warn" style={{ margin: 0, fontSize: 13 }}>
             Live activity is temporarily unavailable: {error}
           </div>
         )}
 
         {!error && !hasItems && (
-          <div className="muted" style={{ padding: 12 }}>
+          <div className="muted" style={{ padding: 10, fontSize: 13 }}>
             No live activity yet.
           </div>
         )}
@@ -84,35 +84,35 @@ export default function LiveActivityFeed() {
             style={{
               border: "1px solid var(--line)",
               borderRadius: 14,
-              padding: "12px 14px",
+              padding: "10px 11px",
               background: "#fff",
               display: "grid",
-              gridTemplateColumns: "44px minmax(0,1fr)",
-              gap: 12,
+              gridTemplateColumns: "32px minmax(0,1fr)",
+              gap: 10,
             }}
           >
             <div
               style={{
-                width: 44,
-                height: 44,
+                width: 32,
+                height: 32,
                 borderRadius: "50%",
                 background: "#e3efed",
                 display: "grid",
                 placeItems: "center",
-                fontSize: 20,
+                fontSize: 14,
               }}
             >
               💬
             </div>
 
             <div style={{ display: "grid", gap: 4 }}>
-              <div style={{ color: "#2b2b30", fontSize: 22, lineHeight: 1.25 }}>
+              <div style={{ color: "#2b2b30", fontSize: 16, lineHeight: 1.25 }}>
                 <strong>{item.actor}</strong> <span style={{ color: "#777" }}>{item.verb}</span>
               </div>
-              <Link href={item.targetHref} style={{ color: "#3c86f6", fontSize: 19, lineHeight: 1.3 }}>
+              <Link href={item.targetHref} style={{ color: "#3c86f6", fontSize: 15, lineHeight: 1.3 }}>
                 {truncate(item.targetLabel, 56)}
               </Link>
-              <div className="muted" style={{ fontSize: 17 }}>
+              <div className="muted" style={{ fontSize: 13 }}>
                 {relativeTime(item.createdAt)}
               </div>
             </div>
