@@ -56,16 +56,16 @@ export default function LiveActivityFeed() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: "10px 14px",
+          padding: "8px 12px",
         }}
       >
-        <strong style={{ fontSize: 21, display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-          <span style={{ fontSize: 14 }}>●</span>Live Activity
+        <strong style={{ fontSize: 16, display: "flex", alignItems: "center", gap: 6, fontWeight: 700 }}>
+          <span style={{ fontSize: 10 }}>●</span>Live Activity
         </strong>
-        <span style={{ opacity: 0.9, fontSize: 13 }}>auto-updating</span>
+        <span style={{ opacity: 0.9, fontSize: 12 }}>auto-updating</span>
       </header>
 
-      <div style={{ maxHeight: 420, overflowY: "auto", padding: 8, display: "grid", gap: 8 }}>
+      <div style={{ maxHeight: 360, overflowY: "auto", padding: 8, display: "grid", gap: 7 }}>
         {error && (
           <div className="warn" style={{ margin: 0, fontSize: 13 }}>
             Live activity is temporarily unavailable: {error}
@@ -84,33 +84,33 @@ export default function LiveActivityFeed() {
             style={{
               border: "1px solid var(--line)",
               borderRadius: 14,
-              padding: "10px 11px",
+              padding: "8px 10px",
               background: "#fff",
               display: "grid",
-              gridTemplateColumns: "32px minmax(0,1fr)",
-              gap: 10,
+              gridTemplateColumns: "26px minmax(0,1fr)",
+              gap: 8,
             }}
           >
             <div
               style={{
-                width: 32,
-                height: 32,
+                width: 26,
+                height: 26,
                 borderRadius: "50%",
                 background: "#e3efed",
                 display: "grid",
                 placeItems: "center",
-                fontSize: 14,
+                fontSize: 12,
               }}
             >
               💬
             </div>
 
             <div style={{ display: "grid", gap: 4 }}>
-              <div style={{ color: "#2b2b30", fontSize: 16, lineHeight: 1.25 }}>
+              <div style={{ color: "#2b2b30", fontSize: 14, lineHeight: 1.25 }}>
                 <strong>{item.actor}</strong> <span style={{ color: "#777" }}>{item.verb}</span>
               </div>
-              <Link href={item.targetHref} style={{ color: "#3c86f6", fontSize: 15, lineHeight: 1.3 }}>
-                {truncate(item.targetLabel, 56)}
+              <Link href={item.targetHref} style={{ color: "#3c86f6", fontSize: 14, lineHeight: 1.3 }}>
+                {truncate(item.targetLabel, 44)}
               </Link>
               <div className="muted" style={{ fontSize: 13 }}>
                 {relativeTime(item.createdAt)}
